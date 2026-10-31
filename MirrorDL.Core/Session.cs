@@ -69,12 +69,17 @@ public sealed class Session
     List<string> _names = [];          // the file names the links give
     string _serverName = "download";   // the name a new download gets
     List<string> _found = [];          // unfinished files of this download: the given ones first
-    readonly List<string> _spare = []; // other unfinished files of this download, not needed once it is done
+    readonly List<Unfinished> _spare = []; // other unfinished files of this download, not needed once it is done
     readonly List<string> _skipped = [];
     string? _refusal; // why an unfinished file with the download's name can't be used, if none can
+    (byte[][] Reference, List<long> Offsets, int Length)? _pieces; // pieces compared before the download
 
-    /// <summary>An unfinished file of this download and what it holds.</summary>
-    sealed record Unfinished(string FilePath, List<(long Start, long End)> Have, bool OnePiece, bool Firefox)
+    /// <summary>
+    /// An unfinished file of this download, what it holds, its size and time when it was read, and whether pieces
+    /// of it were found to match the links.
+    /// </summary>
+    sealed record Unfinished(string FilePath, List<(long Start, long End)> Have, bool OnePiece, bool Firefox,
+        long Length = 0, DateTime Written = default, bool Matched = false)
     {
         public string Name => Path.GetFileName(FilePath);
         public long Bytes => Ranges.Sum(Have);
@@ -288,7 +293,7 @@ public sealed class Session
             Target = Target! with { PartPath = Path.Combine(Target.FinalDir, _serverName + ".part"), Name = _serverName };
         var target = Target!;
         var others = files.Where(f => f != main).ToList();
-        _spare.AddRange(others.Select(f => f.FilePath));
+        _spare.AddRange(others);
         var missing = main != null ? Ranges.Invert(main.Have, size) : [(0, size)];
         _missing = missing;
         LinksChecked?.Invoke();
@@ -454,7 +459,8 @@ public sealed class Session
             File.Delete(path + ".mirrordl"); // left over from an unfinished file that is gone
             return new Unfinished(path, [], false, false);
         }
-        long length = new FileInfo(path).Length;
+        var info = new FileInfo(path);
+        long length = info.Length;
         if (length > size)
         {
             Skip(path, $"{name} ({Format.Bytes(length)}) is bigger than the file behind the links ({Format.Bytes(size)}), so it is a different file.");
@@ -488,7 +494,7 @@ public sealed class Session
             var missing = length < size ? Ranges.Normalize(state.Missing.Append((length, size))) : state.Missing;
             Write($"Found {name} ({from} progress): {Format.Bytes(size - Ranges.Sum(missing))} " +
                   $"of {Format.Bytes(size)} already downloaded.");
-            return new Unfinished(path, Ranges.Invert(missing, size), false, false);
+            return new Unfinished(path, Ranges.Invert(missing, size), false, false, length, info.LastWriteTimeUtc);
         }
 
         // No progress file: a browser (or another program) downloaded the beginning of the file in one piece.
@@ -502,7 +508,7 @@ public sealed class Session
                 return null;
             }
         Write($"Found {name}: it holds the first {Format.Bytes(length)} of {Format.Bytes(size)}.");
-        return new Unfinished(path, keep > 0 ? [(0, keep)] : [], true, PartFinder.IsFirefoxPart(path));
+        return new Unfinished(path, keep > 0 ? [(0, keep)] : [], true, PartFinder.IsFirefoxPart(path), length, info.LastWriteTimeUtc);
     }
 
     /// <summary>
@@ -550,6 +556,7 @@ public sealed class Session
         foreach (var m in byContent.Skip(1).SelectMany(g => g))
             m.Problem = "different content than the other links, skipped";
         var source = byContent[0].First();
+        _pieces = (source.Samples!, offsets, length);
 
         var usable = new List<Unfinished>();
         foreach (var file in files)
@@ -591,7 +598,7 @@ public sealed class Session
                     long good = await GoodPrefixAsync(http, source, part, lastGood, offset, length, ct);
                     Write($"The last {Format.Bytes(kept - good)} of {file.Name} never reached the disk " +
                           "(Firefox stopped before it could write them), so they aren't used.", LogKind.Warn);
-                    return file with { Have = good > 0 ? [(0, good)] : [] };
+                    return file with { Have = good > 0 ? [(0, good)] : [], Matched = good > 0 };
                 }
                 catch (DifferentFile e)
                 {
@@ -610,7 +617,7 @@ public sealed class Session
             return file with { Have = [] };
         }
         Write($"{file.Name} matches the links ({Format.Plural(compared, "piece")} compared).", LogKind.Ok);
-        return file;
+        return file with { Matched = true };
     }
 
     /// <summary>
@@ -749,6 +756,13 @@ public sealed class Session
         }
 
         bool ok = true;
+        string? damage = null; // what the finished file doesn't match
+        if (DiffersFromLinks(target.PartPath) is long differs and >= 0)
+        {
+            ok = false;
+            damage = "the links";
+            Write($"The finished file does NOT match the links at {Format.Bytes(differs)}!", LogKind.Error);
+        }
         if (_job.Checksums.Count > 0)
         {
             SetPhase(Phase.Verifying);
@@ -765,12 +779,18 @@ public sealed class Session
                 else
                 {
                     ok = false;
+                    damage ??= "the checksum";
                     Write($"{algorithm} does NOT match!\n  expected {expected}\n  got      {actual}", LogKind.Error);
                 }
             }
         }
         File.Delete(target.StatePath);
         File.Delete(target.Aria2Path);
+
+        // Before the file gets its name, so that a leftover can't take the name first.
+        if (ok) CleanUp();
+        else if (_spare.Any(f => File.Exists(f.FilePath)))
+            Write($"The other unfinished files of this download are kept, since the finished file doesn't match {damage}.", LogKind.Warn);
 
         string path = target.FinalPath;
         if (!string.Equals(Path.GetFullPath(target.PartPath), Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase))
@@ -781,13 +801,79 @@ public sealed class Session
         }
         SavedPath = path;
         if (ok) Write($"Saved: {path}", LogKind.Ok);
-        else Write($"Saved, but the checksum does NOT match, so the file is probably damaged: {path}", LogKind.Warn);
-        var spare = _spare.SelectMany(p => new[] { p, p + ".mirrordl", p + ".aria2" }).Where(File.Exists).Select(Path.GetFileName).ToList();
-        if (ok && spare.Count > 0)
-            Write($"Not needed anymore - the other unfinished files of this download can be deleted: {string.Join(", ", spare)}", LogKind.Info);
+        else Write($"Saved, but it doesn't match {damage}, so the file is probably damaged: {path}", LogKind.Warn);
         if (_job.Checksums.Count == 0)
             Write("Tip: paste the checksum from the download page together with the links, and the whole file gets checked.", LogKind.Dim);
         return ok;
+    }
+
+    /// <summary>
+    /// Compares the finished file with the links at the pieces compared before the download. Their fingerprints
+    /// are known already, so this reads only those pieces of the file. Where it differs, or -1 (also when nothing
+    /// was compared before).
+    /// </summary>
+    long DiffersFromLinks(string path)
+    {
+        if (_pieces is not { } pieces) return -1;
+        var (reference, offsets, length) = pieces;
+        using var file = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var buffer = new byte[length];
+        for (int i = 0; i < offsets.Count; i++)
+        {
+            ReadAt(file, buffer, offsets[i]);
+            if (!SHA256.HashData(buffer).AsSpan().SequenceEqual(reference[i])) return offsets[i];
+        }
+        return -1;
+    }
+
+    /// <summary>
+    /// Removes the other unfinished files of this download, with their progress files and Firefox's empty
+    /// placeholders - to the Recycle Bin where the drive has one. Only called once the finished file is complete
+    /// and checked; each of these files was found to be this download, and one that changed since or that
+    /// another program has open is kept.
+    /// </summary>
+    void CleanUp()
+    {
+        var removed = new List<string>();
+        foreach (var other in _spare)
+        {
+            var info = new FileInfo(other.FilePath);
+            if (!info.Exists) continue;
+            string? keep = !other.Matched ? "too little of it could be compared to be sure it is this download"
+                : info.Length != other.Length || info.LastWriteTimeUtc != other.Written ? "it changed since it was checked"
+                : InUse(other.FilePath) ? "another program has it open"
+                : null;
+            if (keep != null)
+            {
+                Write($"Kept {other.Name}: {keep}.", LogKind.Warn);
+                continue;
+            }
+            string dir = Path.GetDirectoryName(other.FilePath)!;
+            var placeholders = PartFinder.FinalNames(other.Name, copies: false).Select(n => Path.Combine(dir, n))
+                .Where(p => !p.Equals(other.FilePath, StringComparison.OrdinalIgnoreCase) && new FileInfo(p) is { Exists: true, Length: 0 });
+            foreach (string file in placeholders.Prepend(other.FilePath + ".aria2").Prepend(other.FilePath + ".mirrordl").Prepend(other.FilePath))
+            {
+                if (!File.Exists(file)) continue;
+                if (Native.Recycle(file)) removed.Add(Path.GetFileName(file));
+                else Write($"Could not remove {Path.GetFileName(file)}; it stays where it is.", LogKind.Warn);
+            }
+        }
+        if (removed.Count > 0)
+            Write($"Removed the other unfinished files of this download, which aren't needed anymore (to the Recycle Bin, " +
+                  $"where the drive has one): {string.Join(", ", removed)}", LogKind.Info);
+    }
+
+    static bool InUse(string path)
+    {
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
+            return false;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
     }
 
     /// <summary>The path itself, or "name (1).ext" etc. if it's taken. Firefox's empty placeholder is replaced.</summary>

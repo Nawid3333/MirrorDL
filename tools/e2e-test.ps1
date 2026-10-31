@@ -120,22 +120,33 @@ try {
 
     # Several unfinished files of the same download: MirrorDL's own with the middle third, a numbered Firefox
     # copy with the beginning, and a numbered copy of another file. The first two are put together, so only
-    # the rest is downloaded; the third is left as it is.
-    $dir = New-Folder stitch
-    $whole = [IO.File]::ReadAllBytes("$work\test.bin")
-    $middle = [byte[]]::new(24MB)
-    [Array]::Copy($whole, 8MB, $middle, 8MB, 8MB)
-    [IO.File]::WriteAllBytes("$dir\test.bin.part", $middle)
-    [IO.File]::WriteAllText("$dir\test.bin.part.mirrordl", "mirrordl 2`nsize $(24MB)`nmissing 0 $(8MB)`nmissing $(16MB) $(24MB)`nend`n")
-    Copy-Start "$work\test.bin" "$dir\test(1).Ab12-xY_.bin.part" (6MB)
-    Copy-Start "$work\other.bin" "$dir\test(2).Q1w2E3r4.bin.part" (5MB)
+    # the rest is downloaded, and the Firefox copy is removed at the end; the third is left as it is.
+    function New-Stitch([string] $name) {
+        $dir = New-Folder $name
+        $middle = [byte[]]::new(24MB)
+        [Array]::Copy([IO.File]::ReadAllBytes("$work\test.bin"), 8MB, $middle, 8MB, 8MB)
+        [IO.File]::WriteAllBytes("$dir\test.bin.part", $middle)
+        [IO.File]::WriteAllText("$dir\test.bin.part.mirrordl", "mirrordl 2`nsize $(24MB)`nmissing 0 $(8MB)`nmissing $(16MB) $(24MB)`nend`n")
+        Copy-Start "$work\test.bin" "$dir\test(1).Ab12-xY_.bin.part" (6MB)
+        Copy-Start "$work\other.bin" "$dir\test(2).Q1w2E3r4.bin.part" (5MB)
+        $dir
+    }
+    $dir = New-Stitch stitch
     $otherBefore = Hash "$dir\test(2).Q1w2E3r4.bin.part"
     $run = Invoke-Mirrordl @('-o', $dir, (Url 18001), (Url 18002), $hash)
     Test-Case 'several unfinished files put together' {
         $run.Code -eq 0 -and (Hash "$dir\test.bin") -eq $hash -and
         $run.Output -match 'Took 5\.00 MB from test\(1\)\.Ab12-xY_\.bin\.part' -and $run.Output -match 'Downloaded 11\.00 MB' -and
         $run.Output -match 'test\(2\)\.Q1w2E3r4\.bin\.part is not the same file' -and
-        (Hash "$dir\test(2).Q1w2E3r4.bin.part") -eq $otherBefore -and (Test-Path "$dir\test(1).Ab12-xY_.bin.part")
+        (Hash "$dir\test(2).Q1w2E3r4.bin.part") -eq $otherBefore -and
+        -not (Test-Path "$dir\test(1).Ab12-xY_.bin.part") -and $run.Output -match 'Removed the other unfinished files'
+    } $run
+
+    # The same, but the result doesn't match the checksum given: nothing may be removed then.
+    $dir = New-Stitch stitchdamaged
+    $run = Invoke-Mirrordl @('-o', $dir, (Url 18001), (Url 18002), (Hash "$work\other.bin"))
+    Test-Case 'keeps the other unfinished files when the result is damaged' {
+        $run.Code -eq 2 -and (Test-Path "$dir\test(1).Ab12-xY_.bin.part") -and $run.Output -match 'are kept'
     } $run
 
     # An unfinished file under a name of its own, given by hand: compared by content, saved under the links' name.

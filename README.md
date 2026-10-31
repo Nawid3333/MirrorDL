@@ -111,7 +111,13 @@ pieces all over the file, so their unfinished files can hold different parts. Mi
 2. It compares each one with the links. A different file is left as it is.
 3. The one holding the most is continued; what the others hold beyond it is copied into it.
    Copying on the disk is much faster than downloading.
-4. Only the rest is downloaded. At the end it lists the other files, which aren't needed anymore.
+4. Only the rest is downloaded. Once the finished file checks out, the other files go to the
+   Recycle Bin (where the drive has one), with their progress files.
+
+What "checks out" means: the download finished with the right size, and the file matches the
+checksum you pasted, or, without one, the links at every piece compared before. A file is
+only removed if it was found to be this download, hasn't changed since, and no other program has
+it open. If anything fails, a download stops, is paused or comes out damaged, nothing is removed.
 
 A file from aria2 or MirrorDL needs its progress file (`.aria2` or `.mirrordl`) next to it, since
 only that tells which parts are downloaded. Without it, MirrorDL doesn't use the file.
