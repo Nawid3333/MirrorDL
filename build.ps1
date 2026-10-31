@@ -22,6 +22,9 @@ $out = Join-Path $PSScriptRoot 'publish'
 $app = Join-Path $PSScriptRoot 'MirrorDL.App\MirrorDL.App.csproj'
 $terminal = Join-Path $PSScriptRoot 'MirrorDL\MirrorDL.csproj'
 
+# dotnet publish adds to a folder: files of an earlier build would end up in the zips.
+if (Test-Path $out) { Remove-Item $out -Recurse -Force }
+
 dotnet publish $app -c Release -o "$out\app" "-p:Version=$Version"
 if ($LASTEXITCODE) { throw 'Building the app failed.' }
 dotnet publish $terminal -c Release -o "$out\terminal" "-p:Version=$Version"
