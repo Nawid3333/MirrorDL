@@ -15,8 +15,10 @@ public class TunerTests
     {
         public required double[] PerConnection;
         public double[]? ServerLimit;
-        /// <summary>Connections each server allows; the engine then lowers the link's cap for good.</summary>
+        /// <summary>Connections each server allows; the engine lowers the link's cap when refused.</summary>
         public int[]? ServerConnections;
+        /// <summary>How often a server refused connections.</summary>
+        public int Refusals;
         public double Line = double.PositiveInfinity;
         /// <summary>The speeds go up or down by up to this share, at random.</summary>
         public double Noise;
@@ -43,7 +45,10 @@ public class TunerTests
                 {
                     var m = mirrors[i];
                     if (ServerConnections is { } allowed && m.Cap > allowed[i])
-                        (m.Cap, m.Ceiling, m.LastErrorAt) = (allowed[i], allowed[i], now);
+                    {
+                        (m.Cap, m.LastErrorAt) = (allowed[i], now);
+                        Refusals++;
+                    }
                     m.Workers = Math.Min(m.Cap, MaxTotal - total);
                     total += m.Workers;
                     Peak[i] = Math.Max(Peak[i], m.Workers);
@@ -105,12 +110,21 @@ public class TunerTests
     }
 
     [Fact]
-    public void Never_asks_a_server_that_refused_connections_for_more()
+    public void Asks_a_server_that_refuses_connections_for_more_only_now_and_then()
     {
         var net = new Network { PerConnection = [1 * MB], ServerConnections = [3] };
-        var link = net.Run(300)[0];
+        var link = net.Run(1200)[0];
         Assert.Equal(3, link.Cap);
-        Assert.Equal(3, net.Peak[0]);
+        // At the start, then after 30 s, 60 s, 2 min, 4 min and every 5 min: not more than that in 20 minutes.
+        Assert.InRange(net.Refusals, 2, 8);
+    }
+
+    [Fact]
+    public void Gets_back_the_connections_a_server_refused_for_a_moment()
+    {
+        var net = new Network { PerConnection = [1 * MB], ServerConnections = [16] };
+        var link = net.Run(300, second => net.ServerConnections = [second is >= 30 and < 33 ? 1 : 16])[0];
+        Assert.Equal(Tuner.MaxPerLink, link.Cap);
     }
 
     [Fact]

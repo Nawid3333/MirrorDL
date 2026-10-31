@@ -111,7 +111,7 @@ sealed class Tuner
         double worth = (Speed(now, Window) - _baseline) / _perConnection ?? 0;
         lock (link)
         {
-            // Cap is something else when the server refused connections meanwhile: what it allows then stays.
+            // Cap is something else when the server refused connections meanwhile: then it stays as that left it.
             if (link.Cap == _after && worth >= added / 2.0)
             {
                 link.Cap = _before + Math.Clamp((int)Math.Round(worth, MidpointRounding.AwayFromZero), 1, added);

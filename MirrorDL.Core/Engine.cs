@@ -215,10 +215,12 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
                 && Environment.TickCount64 - Volatile.Read(ref m.LastData) < 5000;
             if (othersWork)
             {
-                // The link works but doesn't allow this many connections: this one ends, and the link never
-                // gets more than it has left. Counted down first, so no other connection leaves as well.
+                // The link works but doesn't allow this many connections - or the server had a moment of trouble,
+                // which looks the same: this one ends, and the link goes on with the ones it has left. Counted down
+                // first, so no other connection leaves as well. Whether more pay off again later, Tuner finds out;
+                // it waits longer each time a link refuses them.
                 int left = Interlocked.Decrement(ref m.Workers);
-                lock (m) m.Cap = m.Ceiling = Math.Max(1, Math.Min(m.Cap, left));
+                lock (m) m.Cap = Math.Max(1, Math.Min(m.Cap, left));
                 return Next.Left;
             }
             // A link that never worked is dropped right away; one that did may just still count our

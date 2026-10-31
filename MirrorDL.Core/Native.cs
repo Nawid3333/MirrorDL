@@ -11,7 +11,6 @@ public static class Native
 {
     const uint FsctlSetSparse = 0x000900C4;
     const uint FsctlQueryAllocatedRanges = 0x000940CF;
-    const int ErrorMoreData = 234;
     static readonly Guid DownloadsFolderId = new("374DE290-123F-4565-9164-39C4925E467B");
 
     [DllImport("kernel32.dll", SetLastError = true)]
@@ -71,15 +70,16 @@ public static class Native
     }
 
     /// <summary>
-    /// Whether the first <paramref name="length"/> bytes of a sparse file have parts that were never written: the
-    /// drive keeps no space for them. A file that isn't sparse has none. False when it can't tell.
+    /// Whether the first <paramref name="length"/> bytes of a file may have parts that were never written: only a
+    /// sparse file can, where the drive keeps no space for them. True also when the drive can't tell.
     /// </summary>
     public static bool HasHoles(SafeFileHandle file, long length)
     {
-        if (!OperatingSystem.IsWindows() || length <= 0) return false;
+        if (!OperatingSystem.IsWindows() || length <= 0 || (File.GetAttributes(file) & FileAttributes.SparseFile) == 0)
+            return false;
         long[] query = [0, length], ranges = new long[4]; // (offset, length) pairs: room for two
         if (!DeviceIoControlRanges(file, FsctlQueryAllocatedRanges, query, 16, ranges, ranges.Length * 8, out int returned, IntPtr.Zero))
-            return Marshal.GetLastWin32Error() == ErrorMoreData; // more pieces than fit: gaps between them
+            return true; // more pieces than fit (gaps between them), or no answer
         return returned != 16 || ranges[0] > 0 || ranges[0] + ranges[1] < length;
     }
 

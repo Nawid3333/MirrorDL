@@ -68,6 +68,8 @@ public sealed class Session
     long _verifyDone, _verifyTotal;
     List<string> _names = [];          // the file names the links give
     string _serverName = "download";   // the name a new download gets
+    /// <summary>The name the links give, if any: without one, an unfinished file keeps its own.</summary>
+    string? LinkName => _serverName == "download" ? null : _serverName;
     List<string> _found = [];          // unfinished files of this download: the given ones first
     readonly List<Unfinished> _spare = []; // other unfinished files of this download, not needed once it is done
     readonly List<string> _skipped = [];
@@ -211,11 +213,12 @@ public sealed class Session
         bool complete;
         if (Size == 0)
         {
-            // An empty file: nothing to download, but it is saved and checked like any other.
+            // An empty file: nothing to download, but it is saved and checked like any other - as a file of its
+            // own, never written over an unfinished file that was found or given.
             LinksChecked?.Invoke();
-            Directory.CreateDirectory(Path.GetDirectoryName(Target.PartPath)!);
+            Directory.CreateDirectory(Target.FinalDir);
+            Target = Target with { PartPath = FreePath(Path.Combine(Target.FinalDir, _serverName + ".part")), Name = _serverName };
             File.WriteAllBytes(Target.PartPath, []);
-            File.Delete(Target.StatePath);
             complete = true;
         }
         else
@@ -267,7 +270,7 @@ public sealed class Session
         // matched (see MultiSourceAsync), never by a server that can only send the whole file.
         string? first = _found.FirstOrDefault(p => given.Contains(p, StringComparer.OrdinalIgnoreCase) || PartFinder.HasName(p, _names));
         return first != null
-            ? new Target(first, PartFinder.FinalName(first, _names, _serverName), dir)
+            ? new Target(first, PartFinder.FinalName(first, _names, LinkName), dir)
             : new Target(Path.Combine(dir, _serverName + ".part"), _serverName, dir);
     }
 
@@ -288,7 +291,7 @@ public sealed class Session
         // The file holding the most becomes the download; what the others hold beyond it is copied in.
         var main = files.MaxBy(f => f.Bytes);
         if (main != null && main.FilePath != Target!.PartPath)
-            Target = Target with { PartPath = main.FilePath, Name = PartFinder.FinalName(main.FilePath, _names, _serverName) };
+            Target = Target with { PartPath = main.FilePath, Name = PartFinder.FinalName(main.FilePath, _names, LinkName) };
         else if (main == null && _found.Count > 0)
             Target = Target! with { PartPath = Path.Combine(Target.FinalDir, _serverName + ".part"), Name = _serverName };
         var target = Target!;
@@ -399,7 +402,17 @@ public sealed class Session
         {
             foreach (var (other, take) in plan)
             {
-                using var source = File.OpenHandle(other.FilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, FileOptions.Asynchronous);
+                SafeFileHandle source;
+                try
+                {
+                    source = File.OpenHandle(other.FilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, FileOptions.Asynchronous);
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    Write($"Could not open {other.Name} ({e.Message.TrimEnd('.')}); what it holds is downloaded instead.", LogKind.Warn);
+                    continue;
+                }
+                using var opened = source;
                 long before = Ranges.Sum(copied);
                 string? failure = null;
                 foreach (var (start, end) in take)
@@ -441,8 +454,16 @@ public sealed class Session
             // Only what is on the disk counts as done.
             Native.Flush(file);
             missing = Ranges.Subtract(missing, copied);
-            new PartState(size, missing).Save(statePath);
             _missing = missing;
+            try
+            {
+                new PartState(size, missing).Save(statePath);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // The progress file keeps what it had before the copying, which is less but true.
+                Write("Could not save the progress: " + e.Message, LogKind.Warn);
+            }
         }
         return missing;
     }
@@ -452,6 +473,19 @@ public sealed class Session
     /// piece, as browsers do - its beginning. Null when it can't be part of this download (see <see cref="Skip"/>).
     /// </summary>
     Unfinished? ReadUnfinished(string path, long size)
+    {
+        try
+        {
+            return ReadUnfinishedFile(path, size);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Skip(path, $"{Path.GetFileName(path)} can't be read ({e.Message.TrimEnd('.')}).");
+            return null;
+        }
+    }
+
+    Unfinished? ReadUnfinishedFile(string path, long size)
     {
         string name = Path.GetFileName(path);
         if (!File.Exists(path))
@@ -467,16 +501,16 @@ public sealed class Session
             return null;
         }
 
-        EnsureAria2Stopped(path + ".aria2");
         PartState? state;
         string? from;
         try
         {
+            EnsureAria2Stopped(path + ".aria2");
             (state, from) = PartState.Load(path + ".mirrordl") is { } own ? (own, "mirrordl")
                 : Aria2Control.Load(path + ".aria2") is { } aria2 ? (aria2, "aria2")
                 : (null, null);
         }
-        catch (UserError e) // a damaged progress file
+        catch (UserError e) // aria2 is still at it, or a damaged progress file
         {
             Skip(path, e.Message);
             return null;
@@ -560,8 +594,19 @@ public sealed class Session
 
         var usable = new List<Unfinished>();
         foreach (var file in files)
-            if ((file.Bytes == 0 ? file : await CheckFileAsync(http, source, file, offsets, length, ct)) is { } result)
-                usable.Add(result);
+        {
+            Unfinished? result;
+            try
+            {
+                result = file.Bytes == 0 ? file : await CheckFileAsync(http, source, file, offsets, length, ct);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                Skip(file.FilePath, $"{file.Name} can't be read ({e.Message.TrimEnd('.')}).");
+                continue;
+            }
+            if (result != null) usable.Add(result);
+        }
         return usable;
     }
 
