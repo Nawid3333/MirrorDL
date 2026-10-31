@@ -182,9 +182,9 @@ jobs:
       AZURE_AD_APPLICATION_SECRET: ${{ secrets.AZURE_AD_APPLICATION_SECRET }}
       SELLER_ID: ${{ secrets.SELLER_ID }}
 
-  # Follows the release in its issue (.github/scripts/rollout.sh): opens it, ticks what went well and says
-  # what failed, so nobody has to look through the runs. The Store's certification, which takes hours to
-  # days, store-status.yml follows from there.
+  # Shows on the release's page where it is, and opens an issue only when a step failed
+  # (.github/scripts/rollout.sh), so nobody has to look through the runs. The Store's certification,
+  # which takes hours to days, store-status.yml follows from there.
   report:
     name: Report
     needs: [version, build, publish, store]
@@ -192,15 +192,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      contents: read
-      issues: write
+      contents: write # the status list in the release notes
+      issues: write   # an issue when a step fails
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: .github/scripts
           persist-credentials: false
 
-      - name: Update the release's issue
+      - name: Update the release's status
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -218,16 +218,16 @@ jobs:
           fi
           steps=github
           if [ "$WITH_STORE" = true ]; then steps+=,store-submitted,store-live; fi
-          "$rollout" start "$TAG" "$steps" >/dev/null
+          "$rollout" start "$TAG" "$steps"
           if [ "$BUILD" != success ]; then
-            "$rollout" fail "$TAG" "Building the release files did not work ($BUILD): the release stays a draft that nobody sees. Fix the cause, then re-run the failed jobs."
+            "$rollout" fail "$TAG" github "Building the release files did not work ($BUILD): the release stays a draft that nobody sees. Fix the cause, then re-run the failed jobs."
           elif [ "$PUBLISH" != success ]; then
-            "$rollout" fail "$TAG" "Publishing the release or checking its downloads did not work ($PUBLISH)."
+            "$rollout" fail "$TAG" github "Publishing the release or checking its downloads did not work ($PUBLISH)."
           else
-            "$rollout" tick "$TAG" github "[The release](https://github.com/$GH_REPO/releases/tag/$TAG) is out, and both downloads work."
+            "$rollout" ok "$TAG" github
           fi
           case $STORE in
-            success) "$rollout" tick "$TAG" store-submitted 'Microsoft certifies it now, which takes from hours to a few days; Store status (store-status.yml) looks every 3 hours.' ;;
+            success) "$rollout" ok "$TAG" store-submitted ;;
             skipped) ;;
-            *) "$rollout" fail "$TAG" "Submitting to the Microsoft Store did not work ($STORE); the GitHub release is out regardless. Fix the cause, then re-run the failed jobs." ;;
+            *) "$rollout" fail "$TAG" store-submitted "Submitting to the Microsoft Store did not work ($STORE); the GitHub release is out regardless. Fix the cause, then re-run the failed jobs." ;;
           esac

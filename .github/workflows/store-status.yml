@@ -1,7 +1,7 @@
 # Follows a release through the Microsoft Store's certification, which takes from hours to a few days,
 # once store.yml has submitted it. Every 3 hours, and from the Actions tab whenever wanted, it looks for
-# the newest release whose issue (.github/scripts/rollout.sh) waits for the Store, asks the Store where
-# that submission is, and ticks "live" - which closes the issue - or reports a failed certification, a
+# the newest release whose page (.github/scripts/rollout.sh) says it is in certification, asks the Store
+# where that submission is, and marks it live there - or opens an issue for a failed certification, a
 # submission that was replaced, or one that takes over a week. With no release waiting, it doesn't even
 # sign in.
 name: Store status
@@ -25,8 +25,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     permissions:
-      contents: read
-      issues: write
+      contents: write # the status list in the release notes
+      issues: write   # an issue when something is wrong
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -62,7 +62,7 @@ jobs:
           TAG: ${{ steps.waiting.outputs.tag }}
         run: ./.github/scripts/store.ps1 -Action status -ProductId $env:PRODUCT_ID -Version $env:TAG.TrimStart('v')
 
-      - name: Update the release's issue
+      - name: Update the release's status
         if: always() && steps.waiting.outputs.tag != ''
         shell: bash
         env:
@@ -78,23 +78,23 @@ jobs:
           rollout=.github/scripts/rollout.sh
           partner="[Partner Center](https://partner.microsoft.com/dashboard/products/$PRODUCT_ID/overview)"
           if [ "$ASKED" != success ]; then
-            "$rollout" fail "$TAG" 'Asking the Microsoft Store where the submission is did not work. If signing in failed, the key may have expired: docs/microsoft-store.md says how to replace it.'
+            "$rollout" fail "$TAG" store-live 'Asking the Microsoft Store where the submission is did not work. If signing in failed, the key may have expired: docs/microsoft-store.md says how to replace it.'
             exit 0
           fi
           case $STATE in
             live)
-              "$rollout" tick "$TAG" store-live "Users get it with the Store's next update check: [MirrorDL in the Store](https://apps.microsoft.com/detail/$PRODUCT_ID)." ;;
+              "$rollout" ok "$TAG" store-live ;;
             failed)
-              "$rollout" fail "$TAG" "The Microsoft Store says $STATUS. $partner shows why; fix it there and submit again, or publish a new release." ;;
+              "$rollout" fail "$TAG" store-live "The Microsoft Store says $STATUS. $partner shows why; fix it there and submit again, or publish a new release." ;;
             gone)
-              "$rollout" fail "$TAG" "The Store's current submission isn't ${TAG#v} anymore (it is at $STATUS): it was replaced or deleted. See $partner." ;;
+              "$rollout" fail "$TAG" store-live "The Store's current submission isn't ${TAG#v} anymore (it is at $STATUS): it was replaced or deleted. See $partner." ;;
             waiting)
-              created=$(gh issue list --state open --label release --json title,createdAt --jq ".[] | select(.title == \"Release $TAG\") | .createdAt")
-              days=$(( ($(date +%s) - $(date -d "$created" +%s)) / 86400 ))
+              published=$(gh release view "$TAG" --json publishedAt --jq .publishedAt)
+              days=$(( ($(date +%s) - $(date -d "$published" +%s)) / 86400 ))
               echo "Waiting for the Store: $STATUS, $days days after the release."
               if [ "$days" -ge 7 ]; then
-                "$rollout" fail "$TAG" "The Store's submission is still at $STATUS after more than a week; $partner may say why."
+                "$rollout" fail "$TAG" store-live "The Store's submission is still at $STATUS after more than a week; $partner may say why."
               fi ;;
             *)
-              "$rollout" fail "$TAG" "The Store answered with something this doesn't know: $STATUS." ;;
+              "$rollout" fail "$TAG" store-live "The Store answered with something this doesn't know: $STATUS." ;;
           esac

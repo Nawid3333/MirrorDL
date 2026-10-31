@@ -176,9 +176,8 @@ release decide, written as [Conventional Commits](https://www.conventionalcommit
 a patch release, `feat:` a minor one, `feat!:` a major one, and `docs:`, `test:`, `ci:` and the like
 release nothing. Neither does any commit that changes nothing that goes into the program (docs,
 tests, tools, workflows). The release gets the zips, and the Microsoft Store gets the same version
-([how that is set up](docs/microsoft-store.md)). Each release has an issue that follows it to
-GitHub and the Store, reports what fails, and closes once the version is out everywhere
-([more](docs/microsoft-store.md#knowing-where-a-release-is)).
+([how that is set up](docs/microsoft-store.md)). Each release's page shows where it is, GitHub and
+the Store, and a failing step opens an issue ([more](docs/microsoft-store.md#knowing-where-a-release-is)).
 
 ## License
 

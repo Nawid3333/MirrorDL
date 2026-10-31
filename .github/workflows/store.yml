@@ -4,10 +4,10 @@
 # published by hand - in both cases only when the repository variable STORE_PRODUCT_ID is set, the
 # last step of the setup (docs/microsoft-store.md) and the switch that turns the Store on.
 #
-# A failure here leaves the GitHub release as it is; the caller reports it in the release's issue
+# A failure here leaves the GitHub release as it is; the caller opens an issue for it
 # (.github/scripts/rollout.sh). Fix the cause (an expired key, a submission edited in Partner Center),
 # then re-run this job. The Store certifies a submission before it goes live, which takes from hours to
-# a few days; store-status.yml keeps an eye on that and closes the release's issue once it is live.
+# a few days; store-status.yml keeps an eye on that and marks the release live on its page.
 name: Microsoft Store
 
 on:
