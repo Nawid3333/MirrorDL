@@ -55,9 +55,13 @@ static class Ui
                 Input.Add(line, job, ignored);
                 continue;
             }
-            if (job.Urls.Count == 0) continue;
-            // Pasted text may contain empty lines: only start when nothing more is waiting.
-            Thread.Sleep(150);
+            if (job.Urls.Count == 0)
+            {
+                Dim("No link yet: paste at least one that starts with http:// or https://.");
+                continue;
+            }
+            // Pasted text may contain empty lines: only start once nothing more arrives for a moment.
+            for (int i = 0; i < 8 && !Console.KeyAvailable; i++) Thread.Sleep(50);
             if (!Console.KeyAvailable) return;
         }
     }
@@ -122,6 +126,9 @@ sealed class ProgressView
             return;
         }
         int width = Math.Max(40, WindowWidth()) - 1;
+        // A block taller than the window would scroll it, and every redraw would then land in the wrong place.
+        int height = Math.Max(4, WindowHeight()) - 1;
+        if (lines.Count > height) lines = [.. lines.Take(height - 1), $"  ... and {lines.Count - height + 1} more"];
         try
         {
             if (_top < 0) Console.CursorVisible = false;
@@ -152,5 +159,11 @@ sealed class ProgressView
     {
         try { return Console.WindowWidth; }
         catch (IOException) { return 100; }
+    }
+
+    static int WindowHeight()
+    {
+        try { return Console.WindowHeight; }
+        catch (IOException) { return 30; }
     }
 }
