@@ -116,6 +116,18 @@ jobs:
           fi
           docker run --rm -v "$GITHUB_WORKSPACE:/repo:ro" -w /repo "$image" -color
 
+      - name: Scripts
+        # The scripts the release workflows call: shellcheck for the bash ones (from the same actionlint
+        # image, which brings it along), PowerShell's own parser for store.ps1.
+        run: |
+          image=$(sed -n 's/^FROM //p' .github/actionlint/Dockerfile)
+          docker run --rm -v "$GITHUB_WORKSPACE:/repo:ro" -w /repo --entrypoint shellcheck "$image" .github/scripts/*.sh
+          pwsh -NoProfile -Command '
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile("$PWD/.github/scripts/store.ps1", [ref]$null, [ref]$errors) | Out-Null
+            foreach ($e in $errors) { "::error file=.github/scripts/store.ps1,line=$($e.Extent.StartLineNumber)::$($e.Message)" }
+            exit $errors.Count'
+
       - name: zizmor
         # Security mistakes actionlint does not look for: a token left where later steps can read
         # it, text spliced into a script, a cache a release restores. What it flags and this

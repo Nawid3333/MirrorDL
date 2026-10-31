@@ -158,8 +158,54 @@ jobs:
     uses: ./.github/workflows/store.yml
     permissions:
       contents: read
+    with:
+      tag: ${{ needs.package.outputs.tag }}
     secrets:
       AZURE_AD_TENANT_ID: ${{ secrets.AZURE_AD_TENANT_ID }}
       AZURE_AD_APPLICATION_CLIENT_ID: ${{ secrets.AZURE_AD_APPLICATION_CLIENT_ID }}
       AZURE_AD_APPLICATION_SECRET: ${{ secrets.AZURE_AD_APPLICATION_SECRET }}
       SELLER_ID: ${{ secrets.SELLER_ID }}
+
+  # A release published by hand: checks it as users get it and follows it in its issue, like
+  # auto-release.yml does for its own (.github/scripts/rollout.sh).
+  report:
+    name: Report
+    needs: [package, store]
+    if: always() && github.event_name == 'release' && needs.package.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Check the release and update its issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name }}
+          PACKAGE: ${{ needs.package.result }}
+          STORE: ${{ needs.store.result }}
+          WITH_STORE: ${{ needs.package.outputs.store == 'true' && vars.STORE_PRODUCT_ID != '' && !github.event.release.prerelease }}
+        run: |
+          set -euo pipefail
+          rollout=.github/scripts/rollout.sh
+          steps=github
+          if [ "$WITH_STORE" = true ]; then steps+=,store-submitted,store-live; fi
+          "$rollout" start "$TAG" "$steps" >/dev/null
+          if [ "$PACKAGE" != success ]; then
+            "$rollout" fail "$TAG" "Building the release files did not work ($PACKAGE): the release has no downloads yet. Fix the cause, then re-run the failed jobs."
+          elif ! .github/scripts/check-release.sh "$TAG"; then
+            "$rollout" fail "$TAG" 'The release is out, but its downloads did not pass the check.'
+          else
+            "$rollout" tick "$TAG" github "[The release](https://github.com/$GH_REPO/releases/tag/$TAG) is out, and both downloads work."
+          fi
+          case $STORE in
+            success) "$rollout" tick "$TAG" store-submitted 'Microsoft certifies it now, which takes from hours to a few days; Store status (store-status.yml) looks every 3 hours.' ;;
+            skipped) ;;
+            *) "$rollout" fail "$TAG" "Submitting to the Microsoft Store did not work ($STORE); the GitHub release is out regardless. Fix the cause, then re-run the failed jobs." ;;
+          esac
