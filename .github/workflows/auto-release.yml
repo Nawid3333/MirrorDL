@@ -1,7 +1,9 @@
 # Releases main automatically, driven by Conventional Commits: once CI has passed on a push to main,
 # the commits since the last release tag decide. Any `fix:` or `perf:` makes a patch release, any
 # `feat:` a minor one, a `!` after the type (`feat!:`) or a "BREAKING CHANGE:" footer a major one.
-# Everything else (chore:, ci:, docs:, test:, refactor:, build:, style:) releases nothing.
+# Everything else (chore:, ci:, docs:, test:, refactor:, build:, style:) releases nothing - and so does
+# any commit when nothing that goes into the program changed (the list is in the version job): a
+# fix: to a workflow or a test is no reason for a new version.
 #
 # The release is created as a draft for the commit CI tested; release.yml builds the zips and attaches
 # them, and only then is the release published, so nobody sees a release without its downloads.
@@ -87,6 +89,15 @@ jobs:
             echo "No fix:, perf: or feat: commit since ${last:-the start}: nothing to release."
             exit 0
           fi
+          # And only if something that goes into the program changed: a fix: to a workflow, a test or the
+          # docs gives users nothing new. These are the files build.ps1 builds the zips and the Store
+          # package from (the projects take the two icons from assets/); add to it when that changes.
+          program=(MirrorDL.Core MirrorDL MirrorDL.App assets/mirrordl.ico assets/logo-64.png
+                   Directory.Build.props global.json build.ps1)
+          if [ -n "$last" ] && git diff --quiet "$last" "$SHA" -- "${program[@]}"; then
+            echo "Nothing that goes into the program changed since $last: nothing to release."
+            exit 0
+          fi
           IFS=. read -r major minor patch <<< "${last#v}"
           major=${major:-0} minor=${minor:-0} patch=${patch:-0}
           case $bump in
@@ -125,6 +136,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
       - name: Publish the draft
         env:
           GH_TOKEN: ${{ github.token }}
@@ -143,16 +159,75 @@ jobs:
             gh release edit "$TAG" --draft=false --latest=false
           fi
 
+      - name: Check the release as users get it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: .github/scripts/check-release.sh "$TAG"
+
   # After the GitHub release is out, so that a Store problem cannot hold it up.
   store:
     name: Microsoft Store
-    needs: [build, publish]
+    needs: [version, build, publish]
     if: needs.build.outputs.store-package == 'true' && vars.STORE_PRODUCT_ID != ''
     uses: ./.github/workflows/store.yml
     permissions:
       contents: read
+    with:
+      tag: ${{ needs.version.outputs.tag }}
     secrets:
       AZURE_AD_TENANT_ID: ${{ secrets.AZURE_AD_TENANT_ID }}
       AZURE_AD_APPLICATION_CLIENT_ID: ${{ secrets.AZURE_AD_APPLICATION_CLIENT_ID }}
       AZURE_AD_APPLICATION_SECRET: ${{ secrets.AZURE_AD_APPLICATION_SECRET }}
       SELLER_ID: ${{ secrets.SELLER_ID }}
+
+  # Follows the release in its issue (.github/scripts/rollout.sh): opens it, ticks what went well and says
+  # what failed, so nobody has to look through the runs. The Store's certification, which takes hours to
+  # days, store-status.yml follows from there.
+  report:
+    name: Report
+    needs: [version, build, publish, store]
+    if: always() && (needs.version.result == 'failure' || needs.version.outputs.tag != '')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Update the release's issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.version.outputs.tag }}
+          BUILD: ${{ needs.build.result }}
+          PUBLISH: ${{ needs.publish.result }}
+          STORE: ${{ needs.store.result }}
+          WITH_STORE: ${{ needs.build.outputs.store-package == 'true' && vars.STORE_PRODUCT_ID != '' }}
+        run: |
+          set -euo pipefail
+          rollout=.github/scripts/rollout.sh
+          if [ -z "$TAG" ]; then
+            "$rollout" problem 'Automatic release failed' 'Working out the next version failed, so nothing was released.'
+            exit 0
+          fi
+          steps=github
+          if [ "$WITH_STORE" = true ]; then steps+=,store-submitted,store-live; fi
+          "$rollout" start "$TAG" "$steps" >/dev/null
+          if [ "$BUILD" != success ]; then
+            "$rollout" fail "$TAG" "Building the release files did not work ($BUILD): the release stays a draft that nobody sees. Fix the cause, then re-run the failed jobs."
+          elif [ "$PUBLISH" != success ]; then
+            "$rollout" fail "$TAG" "Publishing the release or checking its downloads did not work ($PUBLISH)."
+          else
+            "$rollout" tick "$TAG" github "[The release](https://github.com/$GH_REPO/releases/tag/$TAG) is out, and both downloads work."
+          fi
+          case $STORE in
+            success) "$rollout" tick "$TAG" store-submitted 'Microsoft certifies it now, which takes from hours to a few days; Store status (store-status.yml) looks every 3 hours.' ;;
+            skipped) ;;
+            *) "$rollout" fail "$TAG" "Submitting to the Microsoft Store did not work ($STORE); the GitHub release is out regardless. Fix the cause, then re-run the failed jobs." ;;
+          esac

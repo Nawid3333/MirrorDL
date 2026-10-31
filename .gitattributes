@@ -1,3 +1,5 @@
 * text=auto
 *.png binary
 *.ico binary
+# Shell scripts run on Windows runners too, where a checkout would give them CRLF, which bash rejects.
+*.sh text eol=lf

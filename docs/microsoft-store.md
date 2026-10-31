@@ -73,8 +73,35 @@ Once the first submission is **live** in the Store and the four secrets are in, 
 variable, `STORE_PRODUCT_ID`, with the Store ID from step 1.
 
 That's all. From the next release on, the **Auto release** run ends with a **Microsoft Store** job
-that submits the same version, after the GitHub release is out. Partner Center shows the
-certification. A Store problem never holds up the GitHub release; fix it and re-run that job.
+that submits the same version, after the GitHub release is out. A Store problem never holds up the
+GitHub release; fix it and re-run that job.
+
+## Knowing where a release is
+
+Every release gets an issue, **Release vX.Y.Z**, assigned to the repository's owner, so GitHub
+tells you about it. It lists the steps and the workflows tick them as they happen:
+
+- [x] GitHub release published, with both downloads checked
+- [x] Submitted to the Microsoft Store
+- [ ] Certified and live in the Microsoft Store
+
+**When every step is ticked, the issue closes itself: the version is out everywhere.** The last step
+takes Microsoft hours to a few days; **Store status** (`store-status.yml`) asks the Store every 3
+hours while a release waits for it (also from the Actions tab, **Run workflow**).
+
+When something fails, the issue gets the label `release-failed` and a comment that says what and
+links to the run. What fails on the way by itself (a download, signing in, an upload) is tried
+again first; a submission only if none of this version is under way yet, since a new one would
+delete it. What gets reported:
+
+- the release files couldn't be built, or the published downloads don't pass the check (they must
+  download, be whole, and hold their program);
+- the submission to the Store didn't go through;
+- the Store says the certification failed, the submission was replaced or deleted, or it is still
+  waiting after a week;
+- signing in to Partner Center failed: most likely the key expired.
+
+If a release fails before it even has a version, the issue is **Automatic release failed**.
 
 ## Good to know
 
