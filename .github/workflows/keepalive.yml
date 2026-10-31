@@ -3,7 +3,7 @@ name: Keepalive
 # GitHub disables a public repository's scheduled workflows after 60 days without
 # repository activity (in practice: without a commit), and it disables the whole file,
 # push trigger included. MirrorDL may well go two months without a commit, and that would
-# silently stop runner-images.yml and the weekly CodeQL scan, which would then have to be
+# silently stop runner-images.yml, which would then have to be
 # re-enabled from the Actions tab. This does that instead, from the API, and commits
 # nothing to main.
 #

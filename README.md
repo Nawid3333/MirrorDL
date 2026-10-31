@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/Nawid3333/MirrorDL/actions/workflows/ci.yml"><img src="https://github.com/Nawid3333/MirrorDL/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/Nawid3333/MirrorDL/actions/workflows/codeql.yml"><img src="https://github.com/Nawid3333/MirrorDL/actions/workflows/codeql.yml/badge.svg" alt="CodeQL"></a>
+  <a href="https://github.com/Nawid3333/MirrorDL/actions/workflows/github-code-scanning/codeql"><img src="https://github.com/Nawid3333/MirrorDL/actions/workflows/github-code-scanning/codeql/badge.svg" alt="CodeQL"></a>
   <a href="https://github.com/Nawid3333/MirrorDL/releases/latest"><img src="https://img.shields.io/github/v/release/Nawid3333/MirrorDL" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/Nawid3333/MirrorDL" alt="License: GPL-3.0"></a>
 </p>
