@@ -1,7 +1,10 @@
 <Project>
   <!-- Shared by all projects: shown in the file properties of the programs. -->
   <PropertyGroup>
-    <Version>1.0.0</Version>
+    <!-- For local builds. A release build gets the version of its git tag (v1.2.3 -> 1.2.3)
+         from build.ps1 -Version, which release.yml passes: the tag is the only place a
+         version is written down, so there is no version-bump commit. -->
+    <Version>0.0.0-dev</Version>
     <Authors>Nawid Salehie</Authors>
     <Company>Nawid Salehie</Company>
     <Product>MirrorDL</Product>
