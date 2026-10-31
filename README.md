@@ -4,6 +4,13 @@
 
 <p align="center">Download one file from several mirrors at once, after checking that they all serve the same file.</p>
 
+<p align="center">
+  <a href="https://github.com/Nawid3333/MirrorDL/actions/workflows/ci.yml"><img src="https://github.com/Nawid3333/MirrorDL/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/Nawid3333/MirrorDL/actions/workflows/github-code-scanning/codeql"><img src="https://github.com/Nawid3333/MirrorDL/actions/workflows/github-code-scanning/codeql/badge.svg" alt="CodeQL"></a>
+  <a href="https://github.com/Nawid3333/MirrorDL/releases/latest"><img src="https://img.shields.io/github/v/release/Nawid3333/MirrorDL" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Nawid3333/MirrorDL" alt="License: GPL-3.0"></a>
+</p>
+
 MirrorDL can also continue unfinished downloads that Firefox or aria2 left behind. It runs on
 Windows 10 and 11, as a window app and as a terminal program.
 
@@ -30,12 +37,18 @@ Windows 10 and 11, as a window app and as a terminal program.
 - **Copes with real servers:** retries dropped connections, uses fewer connections on servers that
   allow only a few, and saves the progress every 10 seconds and when you pause or close the window.
 
-## Requirements
+## Download
 
-- Windows 10 (1809 or newer) or Windows 11, 64-bit
-- [.NET 10 Runtime](https://dotnet.microsoft.com/download/dotnet/10.0)
+From the [latest release](https://github.com/Nawid3333/MirrorDL/releases/latest):
+`MirrorDL-win-x64.zip` is the window app, `mirrordl-terminal-win-x64.zip` the terminal program.
+Unzip and start; nothing gets installed.
 
-The window app includes the Windows App SDK, so nothing else needs to be installed.
+They need Windows 10 (1809 or newer) or Windows 11, 64-bit, and the
+[.NET 10 Runtime](https://dotnet.microsoft.com/download/dotnet/10.0). The window app brings the
+Windows App SDK along.
+
+**Updates:** the window app tells you when a newer release is out, with a link to it. It asks
+GitHub once at start and sends nothing else ([privacy policy](PRIVACY.md)).
 
 ## Use
 
@@ -89,31 +102,40 @@ choose one yourself.
 
 ## Build
 
-Needs the .NET 10 SDK.
+Needs the .NET 10 SDK. Open `MirrorDL.slnx` in Visual Studio, or:
 
 ```
 .\build.ps1
 ```
 
-This builds both programs into `publish\app` and `publish\terminal` and zips them for a release.
-Or open `MirrorDL.slnx` in Visual Studio.
+This builds both programs into `publish\app` and `publish\terminal` and zips them.
 
 | Project | What it is |
 |---|---|
 | `MirrorDL.Core` | the downloader: link checks, segmented download, resume formats |
 | `MirrorDL.App` | the window app (WinUI 3) |
 | `MirrorDL` | the terminal program |
+| `tests/MirrorDL.Tests` | unit tests |
 
-### Testing
-
-`tools/testserver.py` is a small mirror server for testing. It can be slow, drop connections,
-limit connections or ignore range requests:
+### Tests
 
 ```
-python tools/testserver.py --port 8001 --file test.bin --rate 2000000
-python tools/testserver.py --port 8002 --file test.bin --fail 0.003 --max-conns 2
-mirrordl http://127.0.0.1:8001/test.bin http://127.0.0.1:8002/test.bin
+dotnet test --project tests/MirrorDL.Tests/MirrorDL.Tests.csproj
+pwsh tools/e2e-test.ps1 -Exe MirrorDL/bin/Debug/net10.0/win-x64/mirrordl.exe
 ```
+
+The end-to-end test starts local test mirrors (`tools/testserver.py`, which needs Python) that are
+slow, drop connections, limit connections, serve another file or ignore range requests, downloads
+from them, and checks every result by its SHA-256. With aria2 installed, it also continues a
+download that aria2 started.
+
+### Releases
+
+Releases are automatic. Once CI has passed on a push to `main`, the commit messages since the last
+release decide, written as [Conventional Commits](https://www.conventionalcommits.org): `fix:` makes
+a patch release, `feat:` a minor one, `feat!:` a major one, and `docs:`, `test:`, `ci:` and the like
+release nothing. The release gets the zips, and the Microsoft Store gets the same version
+([how that is set up](docs/microsoft-store.md)).
 
 ## License
 

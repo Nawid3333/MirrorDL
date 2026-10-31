@@ -25,6 +25,18 @@ public static class Native
     [DllImport("shell32.dll")]
     static extern int SHGetKnownFolderPath(in Guid id, uint flags, IntPtr token, out IntPtr path);
 
+    [DllImport("kernel32.dll")]
+    static extern int GetCurrentPackageFullName(ref uint length, IntPtr name);
+
+    /// <summary>True when running as an installed MSIX package, which is how the Store version runs.</summary>
+    public static bool IsPackaged()
+    {
+        if (!OperatingSystem.IsWindows()) return false;
+        uint length = 0;
+        const int NoPackage = 15700; // APPMODEL_ERROR_NO_PACKAGE
+        return GetCurrentPackageFullName(ref length, IntPtr.Zero) != NoPackage;
+    }
+
     /// <summary>
     /// Marks a file as sparse, so that writing far into it doesn't make Windows fill everything before with
     /// zeros first. Does nothing on drives without sparse files (FAT32, exFAT).

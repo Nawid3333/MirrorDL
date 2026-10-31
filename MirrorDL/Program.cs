@@ -41,7 +41,10 @@ static class Program
             switch (args[i])
             {
                 case "-h" or "--help" or "/?":
-                    Console.WriteLine(Help);
+                    Console.WriteLine(Help.Replace("{version}", AppInfo.Version));
+                    return 0;
+                case "--version":
+                    Console.WriteLine($"mirrordl {AppInfo.Version}");
                     return 0;
                 case "-o" or "--out":
                     job.OutDir = Path.GetFullPath(Value(args, ref i));
@@ -135,7 +138,7 @@ static class Program
     }
 
     const string Help = """
-        mirrordl - download one file from several links at once
+        mirrordl {version} - download one file from several links at once
 
         Usage:
           mirrordl                       asks you to paste the links

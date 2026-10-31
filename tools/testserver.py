@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Nawid Salehie
 """Test mirror: serves one file with HTTP Range support, optionally slow, flaky or limited."""
-import argparse, os, random, re, threading, time
+import argparse, os, random, re, sys, threading, time
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 p = argparse.ArgumentParser()
@@ -77,4 +77,15 @@ class Handler(BaseHTTPRequestHandler):
                         time.sleep(ahead)
 
 
-ThreadingHTTPServer(("127.0.0.1", a.port), Handler).serve_forever()
+class Server(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        # A client closing a connection early is normal: mirrordl drops a range once another
+        # connection has taken over the rest of it.
+        if isinstance(sys.exc_info()[1], ConnectionError):
+            return
+        super().handle_error(request, client_address)
+
+
+Server(("127.0.0.1", a.port), Handler).serve_forever()

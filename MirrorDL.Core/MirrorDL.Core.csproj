@@ -8,4 +8,9 @@
     <AssemblyName>MirrorDL.Core</AssemblyName>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- The unit tests check the internal parts too: byte ranges, file names, progress files. -->
+    <InternalsVisibleTo Include="MirrorDL.Tests" />
+  </ItemGroup>
+
 </Project>

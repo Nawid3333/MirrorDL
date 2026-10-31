@@ -1,0 +1,19 @@
+# zizmor (ci.yml's "Lint workflows" job) checks the workflows for security mistakes. What it flags
+# and this repository keeps, and why:
+rules:
+  # workflow_run starts auto-release.yml with the repository's token after a CI run. It acts only on
+  # a green run of a push to main of this repository (its `if:` checks the run's conclusion, event,
+  # branch and repository), and it checks out the commit that run tested - never a fork's code or a
+  # pull request's.
+  dangerous-triggers:
+    ignore:
+      - auto-release.yml
+  # Dependabot proposes a version once it is 3 days old (cooldown in dependabot.yml, see its
+  # header); zizmor's default asks for 7.
+  dependabot-cooldown:
+    config:
+      days: 3
+  # `uses: $/...` for a workflow of this repository: actionlint, which checks every workflow here,
+  # does not accept it yet. `./...` means the same.
+  self-repository:
+    disable: true

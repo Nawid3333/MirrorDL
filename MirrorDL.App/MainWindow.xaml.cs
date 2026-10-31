@@ -27,6 +27,7 @@ public sealed partial class MainWindow : Window
     Task<int>? _run;
     Status? _status;
     bool _closeWhenStopped;
+    Uri? _updatePage;
 
     public MainWindow()
     {
@@ -37,6 +38,8 @@ public sealed partial class MainWindow : Window
         TitleBarIcon.Source = new BitmapImage(new Uri(Path.Combine(AppContext.BaseDirectory, "logo-64.png")));
         PlaceWindow();
         SaveToBox.PlaceholderText = Native.DownloadsFolder();
+        VersionText.Text = AppInfo.Version;
+        if (!Native.IsPackaged()) _ = CheckForUpdateAsync();
 
         _timer = DispatcherQueue.CreateTimer();
         _timer.Interval = TimeSpan.FromMilliseconds(500);
@@ -122,6 +125,19 @@ public sealed partial class MainWindow : Window
         SetRunning(false);
         ShowOutcome(session, code);
         if (_closeWhenStopped) Close();
+    }
+
+    async Task CheckForUpdateAsync()
+    {
+        if (await Updates.FindNewerAsync() is not { } update) return;
+        _updatePage = update.Page;
+        UpdateBar.Message = $"MirrorDL {update.Version} is on GitHub; you have {AppInfo.Version}.";
+        UpdateBar.IsOpen = true;
+    }
+
+    void DownloadUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        if (_updatePage != null) Process.Start(new ProcessStartInfo(_updatePage.ToString()) { UseShellExecute = true });
     }
 
     void Pause_Click(object sender, RoutedEventArgs e)
