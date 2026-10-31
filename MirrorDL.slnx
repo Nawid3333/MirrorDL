@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="MirrorDL.App/MirrorDL.App.csproj" />
+  <Project Path="MirrorDL.Core/MirrorDL.Core.csproj" />
+  <Project Path="MirrorDL/MirrorDL.csproj" />
+</Solution>

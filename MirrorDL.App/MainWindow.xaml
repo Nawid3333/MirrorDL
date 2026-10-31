@@ -1,0 +1,261 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="MirrorDL.App.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:MirrorDL.App"
+    Title="MirrorDL">
+
+    <Window.SystemBackdrop>
+        <MicaBackdrop />
+    </Window.SystemBackdrop>
+
+    <Grid x:Name="Root" AllowDrop="True" DragOver="Root_DragOver" Drop="Root_Drop">
+        <Grid.Resources>
+            <Style x:Key="Card" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="Padding" Value="16" />
+            </Style>
+            <Style x:Key="Label" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+            </Style>
+            <Style x:Key="Value" TargetType="TextBlock" BasedOn="{StaticResource BodyStrongTextBlockStyle}">
+                <Setter Property="Text" Value="–" />
+                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            </Style>
+        </Grid.Resources>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="48" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid x:Name="AppTitleBar" Padding="16,0,150,0">
+            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                <Image x:Name="TitleBarIcon" Width="18" Height="18" />
+                <TextBlock Text="MirrorDL" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <TextBlock Text="one file, many links, all at once" Style="{StaticResource Label}" VerticalAlignment="Center" />
+            </StackPanel>
+        </Grid>
+
+        <ScrollViewer Grid.Row="1">
+            <StackPanel Padding="20,0,20,20" Spacing="12">
+
+                <!-- What to download -->
+                <Border Style="{StaticResource Card}">
+                    <Grid ColumnSpacing="8" RowSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBox x:Name="LinksBox" Grid.ColumnSpan="3" Height="150"
+                                 AcceptsReturn="True" TextWrapping="NoWrap" IsSpellCheckEnabled="False"
+                                 FontFamily="Cascadia Mono, Consolas"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 PlaceholderText="https://…&#x0a;https://…&#x0a;A checksum (MD5, SHA-1, SHA-256, SHA-512) can go here too.">
+                            <TextBox.Header>
+                                <TextBlock Text="Links to the same file, one per line (you can also drop links or files here)"
+                                           FontFamily="{ThemeResource ContentControlThemeFontFamily}" />
+                            </TextBox.Header>
+                        </TextBox>
+
+                        <TextBlock Grid.Row="1" Text="Save to" VerticalAlignment="Center" />
+                        <TextBox x:Name="SaveToBox" Grid.Row="1" Grid.Column="1" />
+                        <Button x:Name="BrowseFolderButton" Grid.Row="1" Grid.Column="2" Content="Browse…" Click="BrowseFolder_Click" />
+
+                        <TextBlock Grid.Row="2" Text="Continue" VerticalAlignment="Center" />
+                        <TextBox x:Name="PartBox" Grid.Row="2" Grid.Column="1"
+                                 PlaceholderText="Optional: an unfinished download from Firefox (.part), aria2 (.aria2) or MirrorDL. One in the save folder is found by itself." />
+                        <Button x:Name="BrowsePartButton" Grid.Row="2" Grid.Column="2" Content="Browse…" Click="BrowsePart_Click" />
+
+                        <Grid Grid.Row="3" Grid.ColumnSpan="3" ColumnSpacing="12" Margin="0,4,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <NumberBox x:Name="ConnectionsBox" Header="Connections" Value="16" Minimum="1" Maximum="64"
+                                       SpinButtonPlacementMode="Inline" />
+                            <NumberBox x:Name="PerLinkBox" Grid.Column="1" Header="Per link" Value="8" Minimum="1" Maximum="64"
+                                       SpinButtonPlacementMode="Inline" />
+                            <Button x:Name="StartButton" Grid.Column="3" VerticalAlignment="Bottom" MinWidth="130"
+                                    AutomationProperties.Name="Start"
+                                    Style="{StaticResource AccentButtonStyle}" Click="Start_Click">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE896;" FontSize="14" />
+                                    <TextBlock x:Name="StartText" Text="Start" />
+                                </StackPanel>
+                            </Button>
+                            <Button x:Name="PauseButton" Grid.Column="4" VerticalAlignment="Bottom" MinWidth="130" IsEnabled="False"
+                                    AutomationProperties.Name="Pause" Click="Pause_Click">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE769;" FontSize="14" />
+                                    <TextBlock Text="Pause" />
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+                    </Grid>
+                </Border>
+
+                <!-- Progress -->
+                <Border Style="{StaticResource Card}">
+                    <StackPanel Spacing="12">
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock x:Name="FileText" Text="Nothing to download yet" Style="{StaticResource SubtitleTextBlockStyle}"
+                                           TextTrimming="CharacterEllipsis" />
+                                <TextBlock x:Name="PhaseText" Text="Paste the links above and press Start." Style="{StaticResource Label}"
+                                           FontSize="14" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                            <TextBlock x:Name="PercentText" Grid.Column="1" Style="{StaticResource TitleTextBlockStyle}" VerticalAlignment="Center" />
+                        </Grid>
+
+                        <ProgressBar x:Name="Progress" Maximum="100" />
+
+                        <Border x:Name="MapFrame" Height="16" CornerRadius="4" BorderThickness="1"
+                                Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                ToolTipService.ToolTip="The whole file from start to end: filled parts are downloaded.">
+                            <Canvas x:Name="Map" SizeChanged="Map_SizeChanged" />
+                        </Border>
+
+                        <Grid ColumnSpacing="16" RowSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="Downloaded" Style="{StaticResource Label}" />
+                                <TextBlock x:Name="DownloadedText" Style="{StaticResource Value}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="Speed" Style="{StaticResource Label}" />
+                                <TextBlock x:Name="SpeedText" Style="{StaticResource Value}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="Time" Style="{StaticResource Label}" />
+                                <TextBlock x:Name="ElapsedText" Style="{StaticResource Value}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="3">
+                                <TextBlock Text="Connections" Style="{StaticResource Label}" />
+                                <TextBlock x:Name="ConnectionsText" Style="{StaticResource Value}" />
+                            </StackPanel>
+                            <StackPanel Grid.Row="1">
+                                <TextBlock Text="Remaining" Style="{StaticResource Label}" />
+                                <TextBlock x:Name="RemainingText" Style="{StaticResource Value}" />
+                            </StackPanel>
+                            <StackPanel Grid.Row="1" Grid.Column="1">
+                                <TextBlock Text="Average speed" Style="{StaticResource Label}" />
+                                <TextBlock x:Name="AverageText" Style="{StaticResource Value}" />
+                            </StackPanel>
+                            <StackPanel Grid.Row="1" Grid.Column="2">
+                                <TextBlock Text="Time left" Style="{StaticResource Label}" />
+                                <TextBlock x:Name="LeftText" Style="{StaticResource Value}" />
+                            </StackPanel>
+                            <StackPanel Grid.Row="1" Grid.Column="3">
+                                <TextBlock Text="Links in use" Style="{StaticResource Label}" />
+                                <TextBlock x:Name="LinksText" Style="{StaticResource Value}" />
+                            </StackPanel>
+                        </Grid>
+
+                        <InfoBar x:Name="Result" IsOpen="False">
+                            <InfoBar.ActionButton>
+                                <Button x:Name="ShowButton" Content="Show in folder" Click="ShowInFolder_Click" />
+                            </InfoBar.ActionButton>
+                        </InfoBar>
+                    </StackPanel>
+                </Border>
+
+                <!-- One row per link -->
+                <Border Style="{StaticResource Card}">
+                    <StackPanel Spacing="6">
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="32" />
+                                <ColumnDefinition Width="2*" />
+                                <ColumnDefinition Width="80" />
+                                <ColumnDefinition Width="44" />
+                                <ColumnDefinition Width="90" />
+                                <ColumnDefinition Width="90" />
+                                <ColumnDefinition Width="3*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="#" Style="{StaticResource Label}" />
+                            <TextBlock Grid.Column="1" Text="Server" Style="{StaticResource Label}" />
+                            <TextBlock Grid.Column="2" Text="Size" Style="{StaticResource Label}" HorizontalTextAlignment="Right" />
+                            <TextBlock Grid.Column="3" Text="Conn." Style="{StaticResource Label}" HorizontalTextAlignment="Right" />
+                            <TextBlock Grid.Column="4" Text="Speed" Style="{StaticResource Label}" HorizontalTextAlignment="Right" />
+                            <TextBlock Grid.Column="5" Text="Downloaded" Style="{StaticResource Label}" HorizontalTextAlignment="Right" />
+                            <TextBlock Grid.Column="6" Text="Status" Style="{StaticResource Label}" />
+                        </Grid>
+                        <TextBlock x:Name="NoLinksText" Text="The links appear here once you press Start." Style="{StaticResource Label}" Margin="0,4" />
+                        <ItemsControl ItemsSource="{x:Bind Links}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="local:LinkRow">
+                                    <Grid ColumnSpacing="12" Padding="0,5" ToolTipService.ToolTip="{x:Bind Url}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="32" />
+                                            <ColumnDefinition Width="2*" />
+                                            <ColumnDefinition Width="80" />
+                                            <ColumnDefinition Width="44" />
+                                            <ColumnDefinition Width="90" />
+                                            <ColumnDefinition Width="90" />
+                                            <ColumnDefinition Width="3*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{x:Bind Number}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Grid.Column="1" Text="{x:Bind Server, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Column="2" Text="{x:Bind Size, Mode=OneWay}" HorizontalTextAlignment="Right" />
+                                        <TextBlock Grid.Column="3" Text="{x:Bind Connections, Mode=OneWay}" HorizontalTextAlignment="Right" />
+                                        <TextBlock Grid.Column="4" Text="{x:Bind Speed, Mode=OneWay}" HorizontalTextAlignment="Right" />
+                                        <TextBlock Grid.Column="5" Text="{x:Bind Downloaded, Mode=OneWay}" HorizontalTextAlignment="Right" />
+                                        <TextBlock Grid.Column="6" Text="{x:Bind Status, Mode=OneWay}" Foreground="{x:Bind StatusBrush, Mode=OneWay}"
+                                                   TextTrimming="CharacterEllipsis" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+                <!-- Messages -->
+                <Expander Header="Details" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                    <ListView x:Name="LogList" ItemsSource="{x:Bind LogLines}" SelectionMode="None" Height="170">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
+                                <Setter Property="MinHeight" Value="0" />
+                                <Setter Property="Padding" Value="4,1" />
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="local:LogLine">
+                                <TextBlock Text="{x:Bind Text}" Foreground="{x:Bind Brush}" TextWrapping="Wrap" IsTextSelectionEnabled="True"
+                                           FontFamily="Cascadia Mono, Consolas" FontSize="12" />
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Expander>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Window>

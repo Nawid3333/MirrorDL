@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- MirrorDL: three mirrors flowing together into one download -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22D3EE"/>
+      <stop offset="1" stop-color="#4F46E5"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#tile)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="20" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M66 50 C66 112 128 104 128 150" stroke-opacity="0.72"/>
+    <path d="M190 50 C190 112 128 104 128 150" stroke-opacity="0.72"/>
+    <path d="M128 50 V170"/>
+    <path d="M90 134 L128 172 L166 134"/>
+    <path d="M70 206 H186"/>
+  </g>
+</svg>
