@@ -45,7 +45,13 @@ Windows 10 and 11, as a window app and as a terminal program.
 
 ## Download
 
-From the [latest release](https://github.com/Nawid3333/MirrorDL/releases/latest):
+**The window app from the Microsoft Store**, which installs it and keeps it up to date:
+
+[<img src="https://get.microsoft.com/images/en-us%20dark.svg" width="200" alt="Get it from Microsoft">](https://apps.microsoft.com/detail/9P94PN403J5W?mode=direct)
+
+or in a terminal: `winget install 9P94PN403J5W`
+
+**Or from the [latest release](https://github.com/Nawid3333/MirrorDL/releases/latest):**
 `MirrorDL-win-x64.zip` is the window app, `mirrordl-terminal-win-x64.zip` the terminal program.
 Unzip and start; nothing gets installed.
 
@@ -53,8 +59,9 @@ They need Windows 10 (1809 or newer) or Windows 11, 64-bit, and the
 [.NET 10 Runtime](https://dotnet.microsoft.com/download/dotnet/10.0). The window app brings the
 Windows App SDK along.
 
-**Updates:** the window app tells you when a newer release is out, with a link to it. It asks
-GitHub once at start and sends nothing else ([privacy policy](PRIVACY.md)).
+**Updates:** the Store version gets them from the Store. The window app from the zip tells you
+when a newer release is out, with a link to it. It asks GitHub once at start and sends nothing
+else ([privacy policy](PRIVACY.md)).
 
 ## Use
 
