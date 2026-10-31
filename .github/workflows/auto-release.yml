@@ -3,9 +3,11 @@
 # `feat:` a minor one, a `!` after the type (`feat!:`) or a "BREAKING CHANGE:" footer a major one.
 # Everything else (chore:, ci:, docs:, test:, refactor:, build:, style:) releases nothing.
 #
-# The release is created as a draft for the commit CI tested; release.yml builds the zips, attaches
-# them and, once it is set up, submits the Store package; only then is the release published. So
-# nobody sees a release without its downloads, and the Store and GitHub get the same version.
+# The release is created as a draft for the commit CI tested; release.yml builds the zips and attaches
+# them, and only then is the release published, so nobody sees a release without its downloads.
+# Once the Store is set up (STORE_PRODUCT_ID, docs/microsoft-store.md), store.yml then submits the
+# same version to the Microsoft Store. It comes last on purpose: a Store problem never holds up the
+# GitHub release.
 #
 # Runs on workflow_run, not push: a commit is released only after CI passed on it. The default token
 # is enough: the draft, the files and the publishing all happen in this run, so no other workflow has
@@ -97,7 +99,7 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
   build:
-    name: Build and deliver
+    name: Build
     needs: version
     if: needs.version.outputs.tag != ''
     uses: ./.github/workflows/release.yml
@@ -106,11 +108,6 @@ jobs:
     with:
       tag: ${{ needs.version.outputs.tag }}
       sha: ${{ github.event.workflow_run.head_sha }}
-    secrets:
-      AZURE_AD_TENANT_ID: ${{ secrets.AZURE_AD_TENANT_ID }}
-      AZURE_AD_APPLICATION_CLIENT_ID: ${{ secrets.AZURE_AD_APPLICATION_CLIENT_ID }}
-      AZURE_AD_APPLICATION_SECRET: ${{ secrets.AZURE_AD_APPLICATION_SECRET }}
-      SELLER_ID: ${{ secrets.SELLER_ID }}
 
   publish:
     name: Publish the release
@@ -126,3 +123,17 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.version.outputs.tag }}
         run: gh release edit "$TAG" --draft=false --latest
+
+  # After the GitHub release is out, so that a Store problem cannot hold it up.
+  store:
+    name: Microsoft Store
+    needs: [build, publish]
+    if: needs.build.outputs.store-package == 'true' && vars.STORE_PRODUCT_ID != ''
+    uses: ./.github/workflows/store.yml
+    permissions:
+      contents: read
+    secrets:
+      AZURE_AD_TENANT_ID: ${{ secrets.AZURE_AD_TENANT_ID }}
+      AZURE_AD_APPLICATION_CLIENT_ID: ${{ secrets.AZURE_AD_APPLICATION_CLIENT_ID }}
+      AZURE_AD_APPLICATION_SECRET: ${{ secrets.AZURE_AD_APPLICATION_SECRET }}
+      SELLER_ID: ${{ secrets.SELLER_ID }}
