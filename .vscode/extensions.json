@@ -1,0 +1,11 @@
+{
+  // VS Code offers these to everyone who opens the project.
+  "recommendations": [
+    "ms-dotnettools.csdevkit",             // C#: IntelliSense, the solution, tests, debugging
+    "ms-vscode.powershell",                // build.ps1 and tools/e2e-test.ps1
+    "ms-python.python",                    // tools/testserver.py
+    "github.vscode-github-actions",        // the workflows, their runs, variables and secrets
+    "github.vscode-pull-request-github",   // pull requests without the browser
+    "redhat.vscode-yaml"                   // dependabot.yml and the issue templates, checked as you type
+  ]
+}

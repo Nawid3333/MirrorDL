@@ -1,0 +1,10 @@
+{
+  // The solution C# Dev Kit loads, so it doesn't have to guess.
+  "dotnet.defaultSolution": "MirrorDL.slnx",
+  // Build output and release files out of the search results.
+  "search.exclude": {
+    "**/bin": true,
+    "**/obj": true,
+    "publish": true
+  }
+}

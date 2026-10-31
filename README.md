@@ -110,6 +110,10 @@ Needs the .NET 10 SDK. Open `MirrorDL.slnx` in Visual Studio, or:
 
 This builds both programs into `publish\app` and `publish\terminal` and zips them.
 
+**In VS Code** (with the recommended extensions it offers): Ctrl+Shift+B builds, F5 starts the window
+app or the terminal program in the debugger, and Terminal > Run Task has the unit tests, the
+end-to-end test, the release zips and the Store package.
+
 | Project | What it is |
 |---|---|
 | `MirrorDL.Core` | the downloader: link checks, segmented download, resume formats |
