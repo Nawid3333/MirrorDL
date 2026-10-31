@@ -56,6 +56,12 @@ jobs:
           SHA: ${{ github.event.workflow_run.head_sha }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          # Above the generated list of changes, on every release.
+          DOWNLOADS: >-
+            **Downloads:** `MirrorDL-win-x64.zip` is the window app, `mirrordl-terminal-win-x64.zip` the terminal
+            program; unzip and start. Both need Windows 10 (1809 or newer) or 11, 64-bit, and the
+            [.NET 10 Runtime](https://dotnet.microsoft.com/download/dotnet/10.0). The window app is also in the
+            Microsoft Store, which needs nothing else and updates it by itself.
         run: |
           set -euo pipefail
           last=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' "$SHA" 2>/dev/null || true)
@@ -95,7 +101,7 @@ jobs:
           if [ "$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null || true)" = true ]; then
             gh release delete "$tag" --yes
           fi
-          notes=(--generate-notes)
+          notes=(--notes "$DOWNLOADS" --generate-notes)
           if [ -n "$last" ]; then notes+=(--notes-start-tag "$last"); fi
           gh release create "$tag" --draft --target "$SHA" --title "MirrorDL ${tag#v}" "${notes[@]}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
@@ -124,7 +130,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.version.outputs.tag }}
-        run: gh release edit "$TAG" --draft=false --latest
+        # "Latest" only if no newer version came out meanwhile (one published by hand, say): GitHub's
+        # releases/latest, the README badge and the app's update check all follow it.
+        run: |
+          set -euo pipefail
+          latest=$(gh release view --json tagName --jq .tagName 2>/dev/null || true)
+          newest=$(printf '%s\n%s\n' "${latest#v}" "${TAG#v}" | sort -V | tail -1)
+          if [ -z "$latest" ] || [ "$newest" = "${TAG#v}" ]; then
+            gh release edit "$TAG" --draft=false --latest
+          else
+            echo "$latest is newer than $TAG: publishing $TAG without making it the latest release."
+            gh release edit "$TAG" --draft=false --latest=false
+          fi
 
   # After the GitHub release is out, so that a Store problem cannot hold it up.
   store:

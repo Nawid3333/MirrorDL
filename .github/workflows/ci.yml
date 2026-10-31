@@ -60,6 +60,20 @@ jobs:
       - name: Unit tests
         run: dotnet test --project tests/MirrorDL.Tests/MirrorDL.Tests.csproj -c Release --no-build
 
+      - name: Window app files
+        # The window app is only built here, never started. A publish that leaves out its compiled XAML
+        # (MirrorDL.pri) still builds, and the app then crashes at start - so check for it.
+        shell: pwsh
+        run: |
+          dotnet publish MirrorDL.App/MirrorDL.App.csproj -c Release -o (Join-Path $env:RUNNER_TEMP app)
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $pri = Join-Path $env:RUNNER_TEMP app/MirrorDL.pri
+          if (-not (Test-Path $pri)) { throw 'The published window app has no MirrorDL.pri: it would crash at start.' }
+          $text = [Text.Encoding]::Latin1.GetString([IO.File]::ReadAllBytes($pri))
+          foreach ($xaml in 'App.xbf', 'MainWindow.xbf') {
+            if (-not $text.Contains($xaml)) { throw "MirrorDL.pri lacks $xaml, the compiled XAML: the app would crash at start." }
+          }
+
       - name: Get aria2
         # The end-to-end test continues a download that aria2 started, with the real aria2: its
         # control file is a format of its own, and a hand-made one would only test what the code
@@ -67,7 +81,8 @@ jobs:
         shell: pwsh
         run: |
           $zip = Join-Path $env:RUNNER_TEMP aria2.zip
-          Invoke-WebRequest https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip -OutFile $zip
+          $url = 'https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip'
+          Invoke-WebRequest $url -OutFile $zip -MaximumRetryCount 3 -RetryIntervalSec 5
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
           if ($hash -ne '67d015301eef0b612191212d564c5bb0a14b5b9c4796b76454276a4d28d9b288') {
             throw "aria2.zip has SHA-256 $hash, not the one of the 1.37.0 release."
