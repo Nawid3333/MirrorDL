@@ -50,6 +50,13 @@ class Handler(BaseHTTPRequestHandler):
             start = int(m.group(1))
             end = min(int(m.group(2)) if m.group(2) else size - 1, size - 1)
             partial = True
+            if start >= size:
+                # As real servers do, also for an empty file: there is no such range.
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
         self.send_response(206 if partial else 200)
         self.send_header("Content-Length", str(end - start + 1))
         self.send_header("Content-Type", "application/octet-stream")

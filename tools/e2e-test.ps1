@@ -67,6 +67,7 @@ try {
     New-TestFile test.bin (24MB) 1
     New-TestFile other.bin (24MB) 2
     New-TestFile small.bin (2MB) 3
+    New-TestFile empty.bin 0 4
     $hash = Hash (Join-Path $work test.bin)
 
     Start-Mirror 18001 test.bin '--rate 4000000'
@@ -76,6 +77,8 @@ try {
     Start-Mirror 18005 test.bin '--rate 3000000 --max-conns 1 --limit-status 403'
     Start-Mirror 18006 test.bin '--no-range --rate 8000000'
     Start-Mirror 18007 test.bin '--rate 100000'
+    Start-Mirror 18008 empty.bin
+    Start-Mirror 18009 empty.bin
 
     # Good and bad links together; only the good ones may be used.
     $dir = New-Folder mixed
@@ -99,6 +102,24 @@ try {
         $run.Code -eq 0 -and (Hash "$dir\test.bin") -eq $hash -and -not (Test-Path "$dir\test.Ab12-xY_.bin.part") -and
         $run.Output -match 'Found test\.Ab12-xY_\.bin\.part'
     } $run
+
+    # Firefox crashed before its last bytes reached the disk: they read as zeros. The good beginning is kept.
+    $dir = New-Folder firefoxcrash
+    New-Item -ItemType File "$dir\test.bin" | Out-Null
+    Copy-Start "$work\test.bin" "$dir\test.Zz9_Qq8w.bin.part" (12MB)
+    $zeros = [IO.File]::Open("$dir\test.Zz9_Qq8w.bin.part", 'Append')
+    $zeros.Write([byte[]]::new(3MB), 0, 3MB)
+    $zeros.Dispose()
+    $run = Invoke-Mirrordl @('-o', $dir, (Url 18001), (Url 18002), $hash)
+    Test-Case 'Firefox .part whose end never reached the disk' {
+        $run.Code -eq 0 -and (Hash "$dir\test.bin") -eq $hash -and $run.Output -match 'never reached the disk'
+    } $run
+
+    # An empty file: nothing to download, still saved and checked.
+    $dir = New-Folder empty
+    $run = Invoke-Mirrordl @('-o', $dir, 'http://127.0.0.1:18008/empty.bin', 'http://127.0.0.1:18009/empty.bin',
+        'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')
+    Test-Case 'empty file' { $run.Code -eq 0 -and (Get-Item "$dir\empty.bin").Length -eq 0 } $run
 
     # The unfinished file of another file must be refused and left alone.
     $dir = New-Folder wrong
