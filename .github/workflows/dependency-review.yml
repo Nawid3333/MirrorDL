@@ -1,0 +1,34 @@
+name: Dependency review
+
+# Looks at what a pull request changes in the NuGet packages and the actions, and fails when it
+# brings in a version with a known vulnerability of high severity or worse. Dependabot alerts only
+# report such a package once it is on main - and a merge to main can be a release - so this is the
+# same check, made before the merge. It matters most for Dependabot's own pull requests.
+#
+# Reads the dependency graph GitHub builds from the project files and workflows, so there is
+# nothing to install.
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: dependency-review-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    name: Review dependency changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high

@@ -1,0 +1,115 @@
+# Builds everything and runs all tests on every push to main and every pull request:
+# - Build and test (Windows): the solution with warnings as errors, the unit tests
+#   (tests/MirrorDL.Tests), then the end-to-end test (tools/e2e-test.ps1). That one downloads from
+#   local test mirrors - good, broken, slow, limited - and checks every file by its SHA-256,
+#   a download that the real aria2 started included.
+# - Lint workflows (Linux): actionlint and zizmor check the workflows themselves.
+#
+# auto-release.yml releases a commit on main only after this workflow passed on it.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # runner-images.yml runs this on a new runner image, before and after
+  # windows-latest and ubuntu-latest move to it.
+  workflow_call:
+    inputs:
+      linux-runner:
+        type: string
+        default: ubuntu-latest
+      windows-runner:
+        type: string
+        default: windows-latest
+
+concurrency:
+  # A newer push to a pull request makes the older run pointless; runs on main all finish.
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test
+    # Windows: the programs are Windows programs, and the window app only builds there.
+    runs-on: ${{ inputs.windows-runner || 'windows-latest' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The SDK version comes from global.json, which Dependabot keeps current.
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      # For tools/testserver.py, the test mirrors of the end-to-end test.
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+
+      - name: Build
+        # Warnings fail the build: a warning nobody reads today is the bug of next month.
+        run: dotnet build MirrorDL.slnx -c Release -warnaserror
+
+      - name: Unit tests
+        run: dotnet test --project tests/MirrorDL.Tests/MirrorDL.Tests.csproj -c Release --no-build
+
+      - name: Get aria2
+        # The end-to-end test continues a download that aria2 started, with the real aria2: its
+        # control file is a format of its own, and a hand-made one would only test what the code
+        # already assumes. The official release, checked against its SHA-256.
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP aria2.zip
+          Invoke-WebRequest https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip -OutFile $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne '67d015301eef0b612191212d564c5bb0a14b5b9c4796b76454276a4d28d9b288') {
+            throw "aria2.zip has SHA-256 $hash, not the one of the 1.37.0 release."
+          }
+          Expand-Archive $zip (Join-Path $env:RUNNER_TEMP aria2)
+
+      - name: End-to-end test
+        shell: pwsh
+        run: |
+          ./tools/e2e-test.ps1 -Exe MirrorDL/bin/Release/net10.0/win-x64/mirrordl.exe `
+            -Aria2 (Join-Path $env:RUNNER_TEMP aria2/aria2-1.37.0-win-64bit-build1/aria2c.exe)
+
+  workflows:
+    name: Lint workflows
+    runs-on: ${{ inputs.linux-runner || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: actionlint
+        # Mistakes in the workflow files: wrong keys, expressions, and shellcheck for the bash
+        # scripts. The image is pinned to tag and digest in .github/actionlint/Dockerfile, where
+        # Dependabot updates it.
+        run: |
+          image=$(sed -n 's/^FROM //p' .github/actionlint/Dockerfile)
+          if ! [[ $image =~ ^rhysd/actionlint:[0-9.]+@sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error file=.github/actionlint/Dockerfile::expected one line 'FROM rhysd/actionlint:<version>@sha256:<digest>', found: $image"
+            exit 1
+          fi
+          docker run --rm -v "$GITHUB_WORKSPACE:/repo:ro" -w /repo "$image" -color
+
+      - name: zizmor
+        # Security mistakes actionlint does not look for: a token left where later steps can read
+        # it, text spliced into a script, a cache a release restores. What it flags and this
+        # repository keeps is in .github/zizmor.yml, each with its reason. Offline: its online
+        # checks call the GitHub API, and a hiccup there would fail CI over nothing in this repository.
+        run: |
+          image=$(sed -n 's/^FROM //p' .github/zizmor/Dockerfile)
+          if ! [[ $image =~ ^ghcr\.io/zizmorcore/zizmor:[0-9.]+@sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error file=.github/zizmor/Dockerfile::expected one line 'FROM ghcr.io/zizmorcore/zizmor:<version>@sha256:<digest>', found: $image"
+            exit 1
+          fi
+          docker run --rm -v "$GITHUB_WORKSPACE:/repo:ro" -w /repo "$image" --offline --format github .github/

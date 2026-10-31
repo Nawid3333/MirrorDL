@@ -1,0 +1,42 @@
+name: Bug report
+description: Something does not work as it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Details
+      description: >
+        The text of the "Details" box in the window, or what the terminal printed. It starts with the
+        MirrorDL version. You can shorten or remove the links in it.
+      render: text
+  - type: dropdown
+    id: program
+    attributes:
+      label: Which MirrorDL
+      options:
+        - Window app, from GitHub
+        - Window app, from the Microsoft Store
+        - Terminal (mirrordl.exe)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Next to the name in the title bar, or `mirrordl --version`.
+      placeholder: 1.2.0
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2

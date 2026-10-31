@@ -1,0 +1,190 @@
+# Builds the release files and delivers them: the two zips onto the GitHub release, and - once the
+# Microsoft Store is set up - the MSIX package to the Store. Three ways in:
+# - auto-release.yml calls it with the tag it is about to publish (the usual way);
+# - a release published by hand (GitHub's page or gh release create) runs it for that release's tag;
+# - run by hand from the Actions tab, it keeps the files on the run instead. With a version, the
+#   Store package is built too: Partner Center takes the very first one only by hand
+#   (docs/microsoft-store.md), and this is where it comes from.
+#
+# The version comes from the tag (v1.2.3 -> 1.2.3) and goes into the programs' file properties and
+# the Store package; the repository holds no version number of its own (Directory.Build.props).
+#
+# The Store step needs the repository variables STORE_PRODUCT_ID, STORE_IDENTITY_NAME,
+# STORE_PUBLISHER and STORE_PUBLISHER_DISPLAY_NAME, and the secrets AZURE_AD_TENANT_ID,
+# AZURE_AD_APPLICATION_CLIENT_ID, AZURE_AD_APPLICATION_SECRET and SELLER_ID. Without
+# STORE_PRODUCT_ID it is skipped, so GitHub releases work before the Store is set up.
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build, like 1.0.0. Empty: a test build (0.0.0-dev), without the Store package.'
+        type: string
+        default: ''
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+      sha:
+        type: string
+        required: true
+    secrets:
+      AZURE_AD_TENANT_ID:
+        required: false
+      AZURE_AD_APPLICATION_CLIENT_ID:
+        required: false
+      AZURE_AD_APPLICATION_SECRET:
+        required: false
+      SELLER_ID:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Build the release files
+    runs-on: windows-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write # upload the zips onto the release
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      store: ${{ steps.version.outputs.store }}
+    steps:
+      - name: Work out the version
+        id: version
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+          MANUAL: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
+          STORE_PRODUCT_ID: ${{ vars.STORE_PRODUCT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -n "$TAG" ]; then
+            if ! [[ $TAG =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+              echo "::error::Release tags look like v1.2.3; '$TAG' does not, so it gives no version."
+              exit 1
+            fi
+            version=${BASH_REMATCH[1]}
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          elif [ -n "$MANUAL" ]; then
+            if ! [[ $MANUAL =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::A version looks like 1.2.3; '$MANUAL' does not."
+              exit 1
+            fi
+            version=$MANUAL
+          else
+            version=0.0.0-dev
+          fi
+          # The Store package needs a real version, and the Store set up.
+          store=false
+          if [ -n "$STORE_PRODUCT_ID" ] && [ "$version" != 0.0.0-dev ]; then store=true; fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "store=$store" >> "$GITHUB_OUTPUT"
+          echo "Version $version, Store package: $store"
+
+      # inputs.sha when auto-release.yml calls: the commit CI passed on. Otherwise empty, which
+      # checks out what the event points to: the release's tag, or the branch of a manual run.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Unit tests
+        # A release by hand may come from a commit CI never saw.
+        run: dotnet test --project tests/MirrorDL.Tests/MirrorDL.Tests.csproj -c Release
+
+      - name: Build
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          STORE: ${{ steps.version.outputs.store }}
+          IDENTITY_NAME: ${{ vars.STORE_IDENTITY_NAME }}
+          PUBLISHER: ${{ vars.STORE_PUBLISHER }}
+          PUBLISHER_DISPLAY_NAME: ${{ vars.STORE_PUBLISHER_DISPLAY_NAME }}
+        run: |
+          $store = @{}
+          if ($env:STORE -eq 'true') {
+            $store = @{ Store = $true; IdentityName = $env:IDENTITY_NAME; Publisher = $env:PUBLISHER
+                        PublisherDisplayName = $env:PUBLISHER_DISPLAY_NAME }
+          }
+          ./build.ps1 -Version $env:VERSION @store
+
+      - name: Attach the zips to the release
+        if: steps.version.outputs.tag != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.version.outputs.tag }}
+        # --clobber: running the workflow again on the same release replaces the files.
+        run: gh release upload "$TAG" publish/MirrorDL-win-x64.zip publish/mirrordl-terminal-win-x64.zip --clobber
+
+      - name: Keep the files on a manual run
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-files
+          path: |
+            publish/*.zip
+            publish/*.msix
+
+      - name: Hand the Store package to the store job
+        if: steps.version.outputs.store == 'true' && steps.version.outputs.tag != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: store-package
+          path: publish/MirrorDL-x64.msix
+          retention-days: 30
+
+  store:
+    name: Submit to the Microsoft Store
+    needs: package
+    # Releases only, once the Store is set up. The Store certifies a submission before it goes
+    # live, which takes from hours to a few days; Partner Center shows where it is.
+    if: needs.package.outputs.store == 'true' && needs.package.outputs.tag != ''
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: store-package
+          path: package
+
+      # Microsoft's action: installs the Microsoft Store Developer CLI (msstore).
+      - uses: microsoft/microsoft-store-apppublisher@cc9910a8d59f2eb55cbb83df0a3800cf3b5300e0 # v1.4
+
+      - name: Sign in to Partner Center
+        shell: pwsh
+        env:
+          TENANT_ID: ${{ secrets.AZURE_AD_TENANT_ID }}
+          SELLER_ID: ${{ secrets.SELLER_ID }}
+          CLIENT_ID: ${{ secrets.AZURE_AD_APPLICATION_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.AZURE_AD_APPLICATION_SECRET }}
+        run: |
+          $missing = 'TENANT_ID', 'SELLER_ID', 'CLIENT_ID', 'CLIENT_SECRET' | Where-Object { -not [Environment]::GetEnvironmentVariable($_) }
+          if ($missing) {
+            Write-Output "::error::STORE_PRODUCT_ID is set, but these secrets are missing: $($missing -join ', ') (docs/microsoft-store.md)."
+            exit 1
+          }
+          msstore reconfigure --tenantId $env:TENANT_ID --sellerId $env:SELLER_ID --clientId $env:CLIENT_ID --clientSecret $env:CLIENT_SECRET
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Submit the package
+        shell: pwsh
+        env:
+          PRODUCT_ID: ${{ vars.STORE_PRODUCT_ID }}
+        run: |
+          msstore publish (Resolve-Path package/MirrorDL-x64.msix).Path -id $env:PRODUCT_ID
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }

@@ -1,0 +1,94 @@
+# Dependabot: weekly pull requests for the NuGet packages, the .NET SDK in global.json, the
+# workflow actions and the two lint images (actionlint, zizmor).
+#
+# Note: Dependabot alerts and security updates are switched on in the repository settings
+# (Settings > Code security), separately from this file.
+#
+# A merged update releases a new version only when it changes what the programs ship.
+# auto-release.yml releases on fix: and feat: commits, so each entry gives its pull requests a
+# prefix to match: the Windows App SDK ships inside the window app, so its updates come as
+# "fix(deps):" and release a patch version. The test packages, the SDK, the actions and the lint
+# images ship nothing: "build(deps):" and "ci(deps):" release nothing.
+#
+# cooldown: a version is proposed once it is 3 days old. Green CI cannot see a compromised
+# release - malware passes the tests - and most compromised packages are found and pulled within
+# days, before the wait is over. Dependabot applies no cooldown to security updates.
+#
+# Minor and patch updates come grouped, one pull request per entry and week; a major update gets
+# a pull request of its own, because it is a decision rather than routine.
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /MirrorDL.App
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+    labels: [dependencies]
+    commit-message:
+      prefix: fix
+      include: scope
+    groups:
+      windows-app-sdk:
+        update-types: [minor, patch]
+
+  - package-ecosystem: nuget
+    directory: /tests/MirrorDL.Tests
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+    labels: [dependencies]
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      test-packages:
+        update-types: [minor, patch]
+
+  # The SDK that builds everything, pinned in global.json. A new major .NET also means new target
+  # frameworks in the project files, so it is left for a deliberate change, not a pull request.
+  - package-ecosystem: dotnet-sdk
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    labels: [dependencies]
+    commit-message:
+      prefix: build
+      include: scope
+    ignore:
+      - dependency-name: '*'
+        update-types: [version-update:semver-major]
+
+  # The actions are pinned to a commit, with the version in a comment: Dependabot updates both.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+    labels: [dependencies]
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      actions:
+        update-types: [minor, patch]
+
+  # The FROM lines of .github/actionlint/Dockerfile and .github/zizmor/Dockerfile: ci.yml runs
+  # those images. Dependabot updates a Dockerfile's FROM line, but not a docker:// line in a workflow.
+  - package-ecosystem: docker
+    directories: [/.github/actionlint, /.github/zizmor]
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    labels: [dependencies]
+    commit-message:
+      prefix: ci
+      include: scope
