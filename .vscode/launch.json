@@ -1,0 +1,27 @@
+{
+  // F5 in Run and Debug. Both build first; breakpoints work in all three projects.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Window app",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      // The exe, not the dll through dotnet: the Windows App SDK the app brings along is found through the exe.
+      "program": "${workspaceFolder}/MirrorDL.App/bin/Debug/net10.0-windows10.0.19041.0/win-x64/MirrorDL.exe",
+      "cwd": "${workspaceFolder}",
+      "console": "internalConsole"
+    },
+    {
+      "name": "Terminal program",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/MirrorDL/bin/Debug/net10.0/win-x64/mirrordl.exe",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      // In VS Code's terminal, so that links can be pasted when it asks for them.
+      "console": "integratedTerminal"
+    }
+  ]
+}

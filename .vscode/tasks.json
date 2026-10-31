@@ -1,0 +1,62 @@
+{
+  // Terminal > Run Task. Ctrl+Shift+B is "build"; "unit tests" is the default test task.
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build",
+      "detail": "Everything, Debug",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["build", "MirrorDL.slnx"],
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "unit tests",
+      "detail": "tests/MirrorDL.Tests",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["test", "--project", "tests/MirrorDL.Tests/MirrorDL.Tests.csproj"],
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "end-to-end test",
+      "detail": "Downloads from local test mirrors and checks every file; needs Python, uses aria2 when it is installed",
+      "type": "process",
+      "command": "pwsh",
+      "args": ["-NoProfile", "-File", "tools/e2e-test.ps1", "-Exe", "MirrorDL/bin/Debug/net10.0/win-x64/mirrordl.exe"],
+      "dependsOn": "build",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "release zips",
+      "detail": "build.ps1: the two zips in publish/, as a release has them (version 0.0.0-dev)",
+      "type": "process",
+      "command": "pwsh",
+      "args": ["-NoProfile", "-File", "build.ps1"],
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "Store package",
+      "detail": "build.ps1 -Store: publish/MirrorDL-x64.msix with the app's identity from Partner Center",
+      "type": "process",
+      "command": "pwsh",
+      "args": [
+        "-NoProfile", "-File", "build.ps1", "-Version", "${input:version}", "-Store",
+        "-IdentityName", "Nawid3333.MirrorDL",
+        "-Publisher", "CN=39ED426A-ACBB-4676-B841-0DA72B96633E",
+        "-PublisherDisplayName", "Nawid3333"
+      ],
+      "problemMatcher": "$msCompile"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "version",
+      "type": "promptString",
+      "description": "Version of the Store package, like 1.2.3 - higher than the one in the Store"
+    }
+  ]
+}
