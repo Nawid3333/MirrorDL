@@ -100,13 +100,13 @@ Download one file from several mirrors at once: faster, and checked first, so ev
 **Keywords** (at most 7, 21 words in all)
 
 ```
-download manager
-mirror
+Download manager
 parallel download
 resume download
-segmented download
-checksum
 aria2
+multi-source downloader
+segmented downloading
+checksum verification
 ```
 
 **Copyright and trademark info:** `Copyright (C) 2026 Nawid Salehie`
@@ -118,16 +118,31 @@ aria2
 ## Submission options
 
 - **Publishing hold:** publish as soon as it passes certification
-- **Notes for certification:**
-
-  ```
-  MirrorDL is a download manager. To test: paste these two links (the Linux kernel source on two mirrors) into the box and press Start; the file is saved in the Downloads folder.
-  https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.12.tar.xz
-  https://mirrors.edge.kernel.org/pub/linux/kernel/v6.x/linux-6.12.tar.xz
-  ```
-
 - **Restricted capabilities (runFullTrust), why the app needs it:**
 
   ```
-  MirrorDL is a desktop download manager. It saves downloads in folders the user chooses and continues unfinished downloads of other programs (the .part files of Firefox and aria2) in place, which needs normal access to the file system.
+  MirrorDL is a desktop download manager (WinUI 3, Windows App SDK) packaged as MSIX. It saves downloads in folders the user chooses and continues unfinished downloads of other programs (the .part files of Firefox and aria2) in place, which needs normal access to the file system. runFullTrust is the standard capability for such desktop apps.
   ```
+
+## Additional testing info
+
+The notes for certification are not under Submission options: they are on their own page,
+Zusätzliche Testinformationen (Additional testing info) in the product's menu.
+
+```
+MirrorDL is a download manager: it downloads one file from several mirror links at the same time. No account or sign-in is needed; it needs an internet connection.
+
+To test:
+1. Start MirrorDL.
+2. Paste these two links (the same Linux kernel source file, 141 MB, on two kernel.org mirrors) into the box:
+https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.12.tar.xz
+https://mirrors.edge.kernel.org/pub/linux/kernel/v6.x/linux-6.12.tar.xz
+3. Press Start. The app checks that both links serve the same file, then downloads parts of it from both at once and shows percent, size and speed per mirror.
+4. The file is saved in the Downloads folder (another folder can be picked in "Save to").
+
+Resume: press Pause during the download, then Continue; it goes on where it stopped.
+
+runFullTrust: MirrorDL is a WinUI 3 desktop app. It writes downloads to folders the user picks and continues unfinished .part files of Firefox and aria2 in place, so it needs normal file system access.
+
+Source code (GPL-3.0): https://github.com/Nawid3333/MirrorDL
+```
