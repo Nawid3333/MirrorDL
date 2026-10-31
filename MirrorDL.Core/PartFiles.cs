@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Nawid Salehie
 
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -40,7 +41,12 @@ public static class Ranges
     }
 }
 
-/// <summary>mirrordl's progress file next to an unfinished download ("name.part.mirrordl"): file size and missing ranges.</summary>
+/// <summary>
+/// mirrordl's progress file next to an unfinished download ("name.part.mirrordl"): file size and missing ranges.
+/// Version 2 ends with an "end" line, so that a file cut short (a power cut while the disk was still
+/// writing it) is noticed instead of being read as fewer missing ranges - which would leave holes in the
+/// finished file. Version 1, written by MirrorDL 1.1.0, has no such line and is still read.
+/// </summary>
 sealed class PartState(long size, List<(long Start, long End)> missing)
 {
     public long Size { get; } = size;
@@ -51,28 +57,42 @@ sealed class PartState(long size, List<(long Start, long End)> missing)
         if (!File.Exists(path)) return null;
         try
         {
+            string[] lines = File.ReadAllLines(path);
+            int version = lines is [var first, ..] && first.Split(' ') is ["mirrordl", var v] ? int.Parse(v, CultureInfo.InvariantCulture) : 0;
             long size = -1;
+            bool ended = false;
             var missing = new List<(long Start, long End)>();
-            foreach (string line in File.ReadLines(path))
+            foreach (string line in lines.Skip(1))
             {
                 string[] parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                if (parts is ["size", var s]) size = long.Parse(s);
-                else if (parts is ["missing", var a, var b]) missing.Add((long.Parse(a), long.Parse(b)));
+                if (parts is ["size", var s]) size = long.Parse(s, CultureInfo.InvariantCulture);
+                else if (parts is ["missing", var a, var b])
+                    missing.Add((long.Parse(a, CultureInfo.InvariantCulture), long.Parse(b, CultureInfo.InvariantCulture)));
+                else if (parts is ["end"]) ended = true;
             }
-            if (size >= 0 && missing.All(r => 0 <= r.Start && r.Start < r.End && r.End <= size))
+            bool complete = version == 1 || version == 2 && ended;
+            if (complete && size >= 0 && missing.All(r => 0 <= r.Start && r.Start < r.End && r.End <= size))
                 return new PartState(size, Ranges.Normalize(missing));
         }
         catch (Exception e) when (e is FormatException or OverflowException) { }
         throw new UserError($"{path} is damaged. Delete it and the unfinished file next to it to start over.");
     }
 
-    /// <summary>Writes a new file and then swaps it in, so a crash never leaves a half-written one.</summary>
+    /// <summary>
+    /// Writes a new file, makes sure it is on the disk, and only then swaps it in: whatever happens, the
+    /// progress file is the old one or the complete new one.
+    /// </summary>
     public void Save(string path)
     {
-        var text = new StringBuilder($"mirrordl 1\nsize {Size}\n");
-        foreach (var (start, end) in Missing) text.Append($"missing {start} {end}\n");
+        var text = new StringBuilder($"mirrordl 2\nsize {Size}\n");
+        foreach (var (start, end) in Missing) text.Append(CultureInfo.InvariantCulture, $"missing {start} {end}\n");
+        text.Append("end\n");
         string temp = path + ".tmp";
-        File.WriteAllText(temp, text.ToString());
+        using (var stream = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            stream.Write(Encoding.UTF8.GetBytes(text.ToString()));
+            stream.Flush(flushToDisk: true);
+        }
         File.Move(temp, path, overwrite: true);
     }
 }
@@ -151,6 +171,19 @@ static class PartFinder
             if (FirefoxToken.IsMatch(pieces[i]))
                 yield return string.Join('.', pieces.Where((_, j) => j != i));
         yield return name;
+    }
+
+    /// <summary>
+    /// Whether an unfinished file comes from Firefox: its name has Firefox's random piece, or Firefox's empty
+    /// placeholder lies next to it. Firefox writes a file from the start to the end, so after a crash only its
+    /// end can be missing.
+    /// </summary>
+    public static bool IsFirefoxPart(string partPath)
+    {
+        if (!partPath.EndsWith(".part", StringComparison.OrdinalIgnoreCase)) return false;
+        string dir = Path.GetDirectoryName(partPath)!;
+        var names = FinalNames(Path.GetFileName(partPath)).ToList();
+        return names.Count > 1 || names.Any(n => new FileInfo(Path.Combine(dir, n)) is { Exists: true, Length: 0 });
     }
 
     /// <summary>The final name for an unfinished file; a link's file name or Firefox's empty placeholder confirms which one.</summary>

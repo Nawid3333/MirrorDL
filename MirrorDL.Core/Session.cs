@@ -4,6 +4,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Security.Cryptography;
+using Microsoft.Win32.SafeHandles;
 
 namespace MirrorDL;
 
@@ -62,6 +63,7 @@ public sealed class Session
     volatile Engine? _engine;
     volatile Mirror? _single;
     volatile List<(long Start, long End)>? _missing;
+    bool _firefoxPrefix; // the unfinished file is Firefox's, with no progress file: only its end can be damaged
     long _verifyDone, _verifyTotal;
 
     public Session(Job job)
@@ -78,6 +80,8 @@ public sealed class Session
     public long? Size { get; private set; }
     public string? SavedPath { get; private set; }
     public string? ErrorMessage { get; private set; }
+    /// <summary>When paused or stopped: what that means for the unfinished file, and what to do next.</summary>
+    public string? Note { get; private set; }
 
     /// <summary>A message for the user. Raised on a background thread.</summary>
     public event Action<string, LogKind>? Log;
@@ -102,10 +106,20 @@ public sealed class Session
             Write(e.Message, LogKind.Error);
             return 1;
         }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // A file MirrorDL needs could not be read, written or moved: in use, no access, drive gone.
+            SetPhase(Phase.Failed);
+            ErrorMessage = "A file could not be used: " + e.Message;
+            Write(ErrorMessage, LogKind.Error);
+            return 1;
+        }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            bool downloaded = _phase is Phase.Verifying or Phase.Finishing;
             SetPhase(Phase.Cancelled);
-            Write("Cancelled.", LogKind.Warn);
+            Note = downloaded ? "The download itself is complete: start again with the same links to check and save it." : null;
+            Write(downloaded ? "Stopped. " + Note : "Cancelled.", LogKind.Warn);
             return 130;
         }
     }
@@ -169,14 +183,35 @@ public sealed class Session
 
         Target = FindTarget(group);
         Size = group[0].Size;
-        bool complete = split
-            ? await MultiSourceAsync(http, group, ct)
-            : await SingleSourceAsync(http, group[0], ct);
+        bool complete;
+        if (Size == 0)
+        {
+            // An empty file: nothing to download, but it is saved and checked like any other.
+            LinksChecked?.Invoke();
+            Directory.CreateDirectory(Path.GetDirectoryName(Target.PartPath)!);
+            File.WriteAllBytes(Target.PartPath, []);
+            File.Delete(Target.StatePath);
+            complete = true;
+        }
+        else
+        {
+            complete = split
+                ? await MultiSourceAsync(http, group, ct)
+                : await SingleSourceAsync(http, group[0], ct);
+        }
         if (!complete)
         {
-            SetPhase(Phase.Paused);
-            Write(split ? "Paused. The progress is saved - start again with the same links to continue."
-                        : $"Stopped. The unfinished file is kept: {Target.PartPath}", LogKind.Warn);
+            if (split)
+            {
+                SetPhase(Phase.Paused);
+                Note = "The progress is saved: start again with the same links to continue.";
+            }
+            else
+            {
+                SetPhase(Phase.Cancelled);
+                Note = $"The unfinished file is kept ({Target.PartPath}), but this server can't continue a download, so the next start begins from the beginning.";
+            }
+            Write((split ? "Paused. " : "Stopped. ") + Note, LogKind.Warn);
             return 130;
         }
 
@@ -200,7 +235,7 @@ public sealed class Session
         string dir = _job.OutDir ?? Native.DownloadsFolder();
         var found = PartFinder.Find(dir, names);
         foreach (string other in found.Skip(1))
-            Write($"Also found {Path.GetFileName(other)} ({Format.Bytes(new FileInfo(other).Length)}), not used.", LogKind.Dim);
+            Write($"Also found {Path.GetFileName(other)} ({Format.Bytes(new FileInfo(other) is { Exists: true } info ? info.Length : 0)}), not used.", LogKind.Dim);
         return found.Count > 0
             ? new Target(found[0], PartFinder.FinalName(found[0], names), dir)
             : new Target(Path.Combine(dir, serverName + ".part"), serverName, dir);
@@ -212,12 +247,12 @@ public sealed class Session
         long size = Size!.Value;
         var missing = ExistingProgress(target, size);
         _missing = missing;
-        var have = Ranges.Invert(missing, size);
         var candidates = group.Where(m => m.Usable).ToList();
-        if (candidates.Count > 1 || have.Count > 0)
+        if (candidates.Count > 1 || Ranges.Sum(missing) < size)
         {
             SetPhase(Phase.Comparing);
-            await CompareContentAsync(http, candidates, target.PartPath, size, have, ct);
+            missing = await CompareContentAsync(http, candidates, target.PartPath, size, missing, ct);
+            _missing = missing;
         }
         LinksChecked?.Invoke();
 
@@ -274,6 +309,12 @@ public sealed class Session
             }
         }
 
+        if (engine.WriteFailure is { } failure)
+        {
+            SetPhase(Phase.Failed);
+            throw new UserError($"Could not write to {target.PartPath}: {failure.Message.TrimEnd('.')}. " +
+                                "The progress up to the last save is kept - make room on the drive (or plug it back in) and start again.");
+        }
         if (!complete && !ct.IsCancellationRequested)
         {
             SetPhase(Phase.Failed);
@@ -305,13 +346,17 @@ public sealed class Session
             if (state.Size != size)
                 throw new UserError($"{partName} was started for a file of {Format.Bytes(state.Size)}, but the links have {Format.Bytes(size)}. " +
                                     "The file has changed - delete the unfinished file to start over.");
-            Write($"Found {partName} ({from} progress): {Format.Bytes(size - Ranges.Sum(state.Missing))} " +
+            // Whatever the progress file says, nothing past the end of the file can be there: the file was
+            // cut short or replaced by an older copy since.
+            var missing = length < size ? Ranges.Normalize(state.Missing.Append((length, size))) : state.Missing;
+            Write($"Found {partName} ({from} progress): {Format.Bytes(size - Ranges.Sum(missing))} " +
                   $"of {Format.Bytes(size)} already downloaded.");
-            return state.Missing;
+            return missing;
         }
 
         // No progress file: Firefox (or another program) downloaded the beginning of the file in one piece.
         long keep = Math.Max(0, length - TailRedo);
+        _firefoxPrefix = PartFinder.IsFirefoxPart(target.PartPath);
         Write($"Found {partName}: it holds the first {Format.Bytes(length)} of {Format.Bytes(size)}.");
         return [(keep, size)];
     }
@@ -321,17 +366,19 @@ public sealed class Session
         if (File.Exists(controlPath)
             && DateTime.UtcNow - File.GetLastWriteTimeUtc(controlPath) < TimeSpan.FromMinutes(2)
             && Process.GetProcessesByName("aria2c").Length > 0)
-            throw new UserError("aria2 still seems to be working on this download (its .aria2 file changed in the last 2 minutes). " +
-                                "Stop aria2 first (Ctrl+C in its window), then try again.");
+            throw new UserError("aria2 is running, and this download's .aria2 file changed in the last 2 minutes. If aria2 is still " +
+                                "working on it, stop aria2 first (Ctrl+C in its window); if not, try again in 2 minutes.");
     }
 
     /// <summary>
     /// Compares a few pieces of every link, and of what is already downloaded, so that only links with the
-    /// same file are used and a different file is never continued.
+    /// same file are used and a different file is never continued. Returns the ranges still missing: as
+    /// given, or - for a Firefox file whose end a crash left empty - with that end added.
     /// </summary>
-    async Task CompareContentAsync(HttpClient http, List<Mirror> mirrors, string partPath, long size,
-        List<(long Start, long End)> have, CancellationToken ct)
+    async Task<List<(long Start, long End)>> CompareContentAsync(HttpClient http, List<Mirror> mirrors, string partPath,
+        long size, List<(long Start, long End)> missing, CancellationToken ct)
     {
+        var have = Ranges.Invert(missing, size);
         int length = (int)Math.Min(Mirror.SampleLength, size);
         var offsets = SampleOffsets(size, length, have);
         Write($"Comparing {offsets.Count} pieces of the file across {Format.Plural(mirrors.Count, "link")}...");
@@ -347,24 +394,85 @@ public sealed class Session
         }
         foreach (var m in byContent.Skip(1).SelectMany(g => g))
             m.Problem = "different content than the other links, skipped";
-        var reference = byContent[0].First().Samples!;
+        var source = byContent[0].First();
+        var reference = source.Samples!;
 
-        if (have.Count == 0) return;
+        if (have.Count == 0) return missing;
         using var part = File.OpenHandle(partPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         var buffer = new byte[length];
         int compared = 0;
+        long lastGood = -1;
         for (int i = 0; i < offsets.Count; i++)
         {
             long offset = offsets[i];
             if (!have.Any(r => r.Start <= offset && offset + length <= r.End)) continue;
-            int read = 0, n;
-            while (read < length && (n = RandomAccess.Read(part, buffer.AsSpan(read), offset + read)) > 0) read += n;
-            if (read < length || !SHA256.HashData(buffer).AsSpan().SequenceEqual(reference[i]))
-                throw new UserError($"{Path.GetFileName(partPath)} is not the same file as the links (it differs at {Format.Bytes(offset)}). " +
-                                    "It is probably another file or version - move or delete it to download from scratch.");
-            compared++;
+            ReadAt(part, buffer, offset);
+            if (SHA256.HashData(buffer).AsSpan().SequenceEqual(reference[i]))
+            {
+                compared++;
+                lastGood = offset;
+                continue;
+            }
+            // Firefox writes from the start to the end; after a crash its file can end in bytes that never reached
+            // the disk and read as zeros. Then the part before them is good, and only the rest is downloaded again.
+            if (_firefoxPrefix && have is [(0, var kept)])
+            {
+                long good = await GoodPrefixAsync(http, source, part, Path.GetFileName(partPath), lastGood, offset, length, ct);
+                Write($"The last {Format.Bytes(kept - good)} of {Path.GetFileName(partPath)} never reached the disk " +
+                      "(Firefox stopped before it could write them); they are downloaded again.", LogKind.Warn);
+                return [(good, size)];
+            }
+            throw new UserError($"{Path.GetFileName(partPath)} is not the same file as the links (it differs at {Format.Bytes(offset)}). " +
+                                "It is probably another file or version - move or delete it to download from scratch.");
         }
         if (compared > 0) Write($"The unfinished file matches the links ({Format.Plural(compared, "piece")} compared).", LogKind.Ok);
+        return missing;
+    }
+
+    /// <summary>
+    /// Where the good beginning of a Firefox file ends. <paramref name="bad"/> is a piece that differs from the
+    /// links, <paramref name="good"/> one before it that matches (-1 if none). Each piece looked at is compared
+    /// byte by byte: it must match, or match up to a point and be zeros from there to its end - the bytes that
+    /// never reached the disk. Anything else means another file, and is refused. Between the two, a binary
+    /// search: about 20 pieces of 64 KB even for 100 GB.
+    /// </summary>
+    static async Task<long> GoodPrefixAsync(HttpClient http, Mirror source, SafeFileHandle part, string partName, long good,
+        long bad, int length, CancellationToken ct)
+    {
+        var mine = new byte[length];
+
+        // -1: the piece matches; otherwise where its zeros begin.
+        async Task<int> CheckAsync(long offset)
+        {
+            byte[] theirs = await source.ReadRangeAsync(http, offset, length, ct);
+            ReadAt(part, mine, offset);
+            int same = mine.AsSpan().CommonPrefixLength(theirs);
+            if (same == length) return -1;
+            if (mine.AsSpan(same).IndexOfAnyExcept((byte)0) < 0) return same;
+            throw new UserError($"{partName} is not the same file as the links (it differs at {Format.Bytes(offset + same)}). " +
+                                "It is probably another file or version - move or delete it to download from scratch.");
+        }
+
+        int zeros = await CheckAsync(bad);
+        if (zeros > 0) return bad + zeros;   // the zeros begin inside this very piece
+        if (good < 0) return 0;              // not even the first piece reached the disk
+        while (bad - good > length)
+        {
+            long middle = good + (bad - good) / 2;
+            zeros = await CheckAsync(middle);
+            if (zeros < 0) good = middle;
+            else if (zeros > 0) return middle + zeros;
+            else bad = middle;
+        }
+        return bad; // everything before it matched; it is zeros from its first byte
+    }
+
+    /// <summary>Reads <paramref name="buffer"/>.Length bytes at <paramref name="offset"/>; what lies past the end of the file reads as zeros.</summary>
+    static void ReadAt(SafeFileHandle file, byte[] buffer, long offset)
+    {
+        Array.Clear(buffer);
+        int read = 0, n;
+        while (read < buffer.Length && (n = RandomAccess.Read(file, buffer.AsSpan(read), offset + read)) > 0) read += n;
     }
 
     /// <summary>Where to compare: start, a third, two thirds, end, and inside what is already downloaded.</summary>
@@ -391,8 +499,10 @@ public sealed class Session
         long? size = Size;
         LinksChecked?.Invoke();
         Write($"{m.Url.Authority} can't send parts of the file: downloading over one connection, and an interrupted download can't be continued.", LogKind.Warn);
-        if (File.Exists(target.PartPath) && !await ConfirmAsync($"{Path.GetFileName(target.PartPath)} already exists. Overwrite it?"))
-            throw new UserError("Nothing downloaded.");
+        if (File.Exists(target.PartPath) && !await ConfirmAsync(
+                $"{Path.GetFileName(target.PartPath)} is already there ({Format.Bytes(new FileInfo(target.PartPath).Length)}), but " +
+                $"{m.Url.Authority} can't continue a download. Download the whole file again and replace it?"))
+            throw new UserError("Nothing downloaded; the unfinished file is left as it was.");
         if (size is long known) CheckDiskSpace(target.PartPath, known, known);
         Directory.CreateDirectory(Path.GetDirectoryName(target.PartPath)!);
         File.Delete(target.StatePath);

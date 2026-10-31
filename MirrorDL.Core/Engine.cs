@@ -14,6 +14,9 @@ sealed class SourceError(string message, int status = 0, bool fatal = false) : E
     public bool Fatal { get; } = fatal;
 }
 
+/// <summary>Writing to the file failed (disk full, drive gone): no link can help with that, so everything stops.</summary>
+sealed class WriteError(IOException inner) : Exception(inner.Message, inner);
+
 /// <summary>
 /// Downloads the missing ranges of one file from several identical links at once. Every connection works
 /// on a segment of its own; a connection without work takes a free range or splits the biggest unfinished
@@ -37,6 +40,10 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
     readonly List<(long Start, long End)> _free = Ranges.Normalize(missing);
     readonly List<Segment> _active = [];
     readonly List<Task> _workers = [];
+    CancellationTokenSource? _stop;
+
+    /// <summary>Why writing to the file failed, if it did; the download then stopped.</summary>
+    public IOException? WriteFailure { get; private set; }
 
     public bool IsComplete
     {
@@ -59,10 +66,10 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
     public async Task<bool> RunAsync(Action tick, CancellationToken ct)
     {
         foreach (var m in mirrors) m.Cap = perServer;
-        using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using var stop = _stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
         try
         {
-            while (!IsComplete && !ct.IsCancellationRequested)
+            while (!IsComplete && !ct.IsCancellationRequested && WriteFailure == null)
             {
                 StartWorkers(stop.Token);
                 if (_workers.Count == 0) break; // every link failed
@@ -130,6 +137,12 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
                     error = e;
                 }
                 Release(segment);
+                if (error is WriteError write)
+                {
+                    lock (_lock) WriteFailure ??= (IOException)write.InnerException!;
+                    _stop?.Cancel();
+                    return;
+                }
                 if (error == null)
                     failures = 0;
                 else if (ct.IsCancellationRequested || !await RecoverAsync(m, error, ++failures, ct))
@@ -227,7 +240,14 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
             }
             if (take > 0)
             {
-                await RandomAccess.WriteAsync(file, buffer.AsMemory(0, take), at, ct);
+                try
+                {
+                    await RandomAccess.WriteAsync(file, buffer.AsMemory(0, take), at, ct);
+                }
+                catch (IOException e)
+                {
+                    throw new WriteError(e);
+                }
                 lock (_lock) segment.Pos = at + take;
                 m.GotData(take);
             }

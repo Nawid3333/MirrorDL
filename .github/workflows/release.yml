@@ -45,6 +45,9 @@ permissions:
 jobs:
   package:
     name: Build the release files
+    # A release by github-actions[bot] is auto-release.yml's: if someone publishes its draft by hand before
+    # it is done, auto-release still attaches the files and submits to the Store, so this stays out of it.
+    if: github.event_name != 'release' || github.event.release.author.login != 'github-actions[bot]'
     runs-on: windows-latest
     timeout-minutes: 40
     permissions:
@@ -85,11 +88,12 @@ jobs:
           echo "store=$store" >> "$GITHUB_OUTPUT"
           echo "Version $version, Store package: $store"
 
-      # inputs.sha when auto-release.yml calls: the commit CI passed on. Otherwise empty, which
-      # checks out what the event points to: the release's tag, or the branch of a manual run.
+      # inputs.sha when auto-release.yml calls: the commit CI passed on. A manual run with a version
+      # builds that version's tag, so the files hold exactly what was released under it (it fails if
+      # there is no such tag). Otherwise empty: the release's tag, or the branch of a test build.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.sha }}
+          ref: ${{ inputs.sha || (github.event_name == 'workflow_dispatch' && inputs.version != '' && format('refs/tags/v{0}', inputs.version)) || '' }}
           persist-credentials: false
 
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -143,13 +147,14 @@ jobs:
           path: publish/MirrorDL-x64.msix
           retention-days: 30
 
-  # A release published by hand. auto-release.yml calls store.yml itself, after publishing.
+  # A release published by hand. auto-release.yml calls store.yml itself, after publishing. A pre-release
+  # stays on GitHub: the Store has no such thing, so it would go out to everyone.
   store:
     name: Microsoft Store
     needs: package
     if: >
-      github.event_name == 'release' && needs.package.outputs.store == 'true' &&
-      vars.STORE_PRODUCT_ID != ''
+      github.event_name == 'release' && !github.event.release.prerelease &&
+      needs.package.outputs.store == 'true' && vars.STORE_PRODUCT_ID != ''
     uses: ./.github/workflows/store.yml
     permissions:
       contents: read

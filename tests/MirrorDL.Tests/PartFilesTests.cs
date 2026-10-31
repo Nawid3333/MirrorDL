@@ -44,6 +44,19 @@ public class PartFinderTests
     }
 
     [Fact]
+    public void IsFirefoxPart_knows_Firefox_by_its_random_piece_or_its_empty_placeholder()
+    {
+        using var folder = new TempFolder();
+        Assert.True(PartFinder.IsFirefoxPart(folder.File("a.Ab12Cd34.bin.part", 10)));
+
+        folder.File("b.bin");                                           // the empty placeholder
+        Assert.True(PartFinder.IsFirefoxPart(folder.File("b.bin.part", 10)));
+
+        Assert.False(PartFinder.IsFirefoxPart(folder.File("c.bin.part", 10)));  // no sign of Firefox
+        Assert.False(PartFinder.IsFirefoxPart(folder.File("d.iso", 10)));       // not a .part file
+    }
+
+    [Fact]
     public void Find_puts_the_download_with_a_progress_file_first_and_ignores_other_files()
     {
         using var folder = new TempFolder();
@@ -69,6 +82,36 @@ public class PartStateTests
         Assert.Equal(1000, loaded.Size);
         List<(long Start, long End)> expected = [(0, 100), (500, 1000)];
         Assert.Equal(expected, loaded.Missing);
+    }
+
+    [Fact]
+    public void Save_writes_version_2_with_an_end_line()
+    {
+        using var folder = new TempFolder();
+        string path = Path.Combine(folder.Path, "x.part.mirrordl");
+        new PartState(1000, [(0, 100)]).Save(path);
+        Assert.Equal(["mirrordl 2", "size 1000", "missing 0 100", "end"], File.ReadAllLines(path));
+        Assert.False(File.Exists(path + ".tmp"));
+    }
+
+    [Fact]
+    public void Load_refuses_a_version_2_file_that_was_cut_short()
+    {
+        using var folder = new TempFolder();
+        string path = Path.Combine(folder.Path, "x.part.mirrordl");
+        // Cut after a "missing" line: read as it is, the ranges after it would count as downloaded.
+        File.WriteAllText(path, "mirrordl 2\nsize 1000\nmissing 0 100\n");
+        Assert.Throws<UserError>(() => PartState.Load(path));
+    }
+
+    [Fact]
+    public void Load_still_reads_version_1_files_of_MirrorDL_1_1()
+    {
+        using var folder = new TempFolder();
+        string path = Path.Combine(folder.Path, "x.part.mirrordl");
+        File.WriteAllText(path, "mirrordl 1\nsize 1000\nmissing 0 100\nmissing 500 1000\n");
+        List<(long Start, long End)> expected = [(0, 100), (500, 1000)];
+        Assert.Equal(expected, PartState.Load(path)!.Missing);
     }
 
     [Fact]

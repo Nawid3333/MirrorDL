@@ -47,7 +47,12 @@ static class Program
                     Console.WriteLine($"mirrordl {AppInfo.Version}");
                     return 0;
                 case "-o" or "--out":
-                    job.OutDir = Path.GetFullPath(Value(args, ref i));
+                    string folder = Value(args, ref i);
+                    try { job.OutDir = Path.GetFullPath(folder); }
+                    catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
+                    {
+                        throw new UserError($"Can't use \"{folder}\" as the folder to save in: {e.Message}");
+                    }
                     break;
                 case "-c" or "--connections":
                     job.Connections = Number(args, ref i);

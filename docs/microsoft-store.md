@@ -87,3 +87,5 @@ certification. A Store problem never holds up the GitHub release; fix it and re-
   `AZURE_AD_APPLICATION_SECRET` secret.
 - The Store version doesn't look for updates on GitHub; the Store updates it. The GitHub version
   shows a notice in its window when a newer release exists.
+- A release you publish by hand as a **pre-release** stays on GitHub: the Store has no pre-releases,
+  so it would go out to everyone.

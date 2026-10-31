@@ -18,8 +18,9 @@
 # a pull request of its own, because it is a decision rather than routine.
 version: 2
 updates:
+  # Everything that ships: the window app, the terminal program and the library they share.
   - package-ecosystem: nuget
-    directory: /MirrorDL.App
+    directories: [/MirrorDL.App, /MirrorDL, /MirrorDL.Core]
     schedule:
       interval: weekly
     cooldown:

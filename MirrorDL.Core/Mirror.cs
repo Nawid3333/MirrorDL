@@ -71,6 +71,11 @@ public sealed class Mirror(int index, Uri url)
             {
                 Size = headers.ContentLength;
             }
+            else if (response.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable && headers.ContentRange is { HasLength: true, Length: 0 })
+            {
+                Size = 0; // an empty file: it has no first byte to ask for
+                SupportsRanges = true;
+            }
             else
             {
                 Problem = response.IsSuccessStatusCode
@@ -100,24 +105,10 @@ public sealed class Mirror(int index, Uri url)
     internal async Task SampleAsync(HttpClient http, IReadOnlyList<long> offsets, int length, CancellationToken ct)
     {
         var samples = new byte[offsets.Count][];
-        var buffer = new byte[length];
         try
         {
             for (int i = 0; i < offsets.Count; i++)
-            {
-                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                timeout.CancelAfter(CheckTimeout);
-                using var request = new HttpRequestMessage(HttpMethod.Get, Url);
-                request.Headers.Range = new RangeHeaderValue(offsets[i], offsets[i] + length - 1);
-                using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
-                if (response.StatusCode != HttpStatusCode.PartialContent)
-                    throw new SourceError($"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
-                if (response.Content.Headers.ContentRange?.From != offsets[i])
-                    throw new SourceError("server sent the wrong part of the file");
-                await using var body = await response.Content.ReadAsStreamAsync(timeout.Token);
-                await body.ReadExactlyAsync(buffer, timeout.Token);
-                samples[i] = SHA256.HashData(buffer);
-            }
+                samples[i] = await HashRangeAsync(http, offsets[i], length, ct);
             Samples = samples;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -130,12 +121,44 @@ public sealed class Mirror(int index, Uri url)
         }
     }
 
-    static string CleanFileName(string name)
+    /// <summary>The SHA-256 of <paramref name="length"/> bytes at <paramref name="offset"/>, as this link sends them.</summary>
+    internal async Task<byte[]> HashRangeAsync(HttpClient http, long offset, int length, CancellationToken ct) =>
+        SHA256.HashData(await ReadRangeAsync(http, offset, length, ct));
+
+    /// <summary><paramref name="length"/> bytes at <paramref name="offset"/>, as this link sends them.</summary>
+    internal async Task<byte[]> ReadRangeAsync(HttpClient http, long offset, int length, CancellationToken ct)
+    {
+        if (length <= 0) return [];
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(CheckTimeout);
+        using var request = new HttpRequestMessage(HttpMethod.Get, Url);
+        request.Headers.Range = new RangeHeaderValue(offset, offset + length - 1);
+        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+        if (response.StatusCode != HttpStatusCode.PartialContent)
+            throw new SourceError($"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
+        if (response.Content.Headers.ContentRange?.From != offset)
+            throw new SourceError("server sent the wrong part of the file");
+        var buffer = new byte[length];
+        await using var body = await response.Content.ReadAsStreamAsync(timeout.Token);
+        await body.ReadExactlyAsync(buffer, timeout.Token);
+        return buffer;
+    }
+
+    // Names Windows keeps for devices, with or without an extension: a file "nul.iso" would be the NUL device.
+    static readonly HashSet<string> DeviceNames = new(
+        ["CON", "PRN", "AUX", "NUL", .. Enumerable.Range(0, 10).SelectMany(i => new[] { $"COM{i}", $"LPT{i}" }),
+         "COM¹", "COM²", "COM³", "LPT¹", "LPT²", "LPT³"],
+        StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>A file name a server sent, made safe: no folders, no invalid characters, no device name.</summary>
+    internal static string CleanFileName(string name)
     {
         name = name.Trim().Trim('"');
         name = name[(name.LastIndexOfAny(['/', '\\']) + 1)..];
         char[] invalid = Path.GetInvalidFileNameChars();
         name = new string(name.Select(c => invalid.Contains(c) ? '_' : c).ToArray()).Trim().TrimEnd('.');
-        return name.Length == 0 ? "download" : name;
+        if (name.Length == 0) return "download";
+        string stem = name.Split('.')[0].TrimEnd();
+        return DeviceNames.Contains(stem) ? "_" + name : name;
     }
 }

@@ -76,7 +76,7 @@ public sealed partial class MainWindow : Window
             try { job.OutDir = Path.GetFullPath(saveTo); }
             catch (Exception ex) when (ex is ArgumentException or NotSupportedException or IOException)
             {
-                ShowResult(InfoBarSeverity.Warning, "Can't use that folder", saveTo);
+                ShowResult(InfoBarSeverity.Warning, "Can't use that folder", $"{saveTo}: {ex.Message}");
                 return;
             }
         }
@@ -248,7 +248,7 @@ public sealed partial class MainWindow : Window
                     "The progress is saved. Press Continue to go on, also after closing MirrorDL.");
                 break;
             case 130:
-                ShowResult(InfoBarSeverity.Informational, "Cancelled", null);
+                ShowResult(InfoBarSeverity.Informational, "Stopped", session.Note);
                 break;
             default:
                 ShowResult(InfoBarSeverity.Error, "Download failed", session.ErrorMessage ?? "See the details below.");
@@ -334,12 +334,21 @@ public sealed partial class MainWindow : Window
 
     async void Root_Drop(object sender, DragEventArgs e)
     {
-        if (e.DataView.Contains(StandardDataFormats.StorageItems))
-            foreach (var item in await e.DataView.GetStorageItemsAsync()) Use(item.Path);
-        else if (e.DataView.Contains(StandardDataFormats.WebLink))
-            AppendLinks((await e.DataView.GetWebLinkAsync()).ToString());
-        else if (e.DataView.Contains(StandardDataFormats.Text))
-            AppendLinks(await e.DataView.GetTextAsync());
+        // async void: an exception here would end the app, and a drop can fail for reasons outside it (the
+        // source app took the data back, a file in the cloud could not be fetched).
+        try
+        {
+            if (e.DataView.Contains(StandardDataFormats.StorageItems))
+                foreach (var item in await e.DataView.GetStorageItemsAsync()) Use(item.Path);
+            else if (e.DataView.Contains(StandardDataFormats.WebLink))
+                AppendLinks((await e.DataView.GetWebLinkAsync()).ToString());
+            else if (e.DataView.Contains(StandardDataFormats.Text))
+                AppendLinks(await e.DataView.GetTextAsync());
+        }
+        catch (Exception ex)
+        {
+            ShowResult(InfoBarSeverity.Warning, "Couldn't use what was dropped", ex.Message);
+        }
     }
 
     /// <summary>A folder becomes the save folder, a .txt file adds its links, another file is the one to continue.</summary>
