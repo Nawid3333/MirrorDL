@@ -174,7 +174,8 @@ download that aria2 started.
 Releases are automatic. Once CI has passed on a push to `main`, the commit messages since the last
 release decide, written as [Conventional Commits](https://www.conventionalcommits.org): `fix:` makes
 a patch release, `feat:` a minor one, `feat!:` a major one, and `docs:`, `test:`, `ci:` and the like
-release nothing. The release gets the zips, and the Microsoft Store gets the same version
+release nothing. Neither does any commit that changes nothing that goes into the program (docs,
+tests, tools, workflows). The release gets the zips, and the Microsoft Store gets the same version
 ([how that is set up](docs/microsoft-store.md)). Each release has an issue that follows it to
 GitHub and the Store, reports what fails, and closes once the version is out everywhere
 ([more](docs/microsoft-store.md#knowing-where-a-release-is)).
