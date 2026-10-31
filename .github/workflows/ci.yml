@@ -106,12 +106,12 @@ jobs:
 
       - name: actionlint
         # Mistakes in the workflow files: wrong keys, expressions, and shellcheck for the bash
-        # scripts. The image is pinned to tag and digest in .github/actionlint/Dockerfile, where
+        # scripts. The image is pinned to tag and digest in tools/lint/actionlint/Dockerfile, where
         # Dependabot updates it.
         run: |
-          image=$(sed -n 's/^FROM //p' .github/actionlint/Dockerfile)
+          image=$(sed -n 's/^FROM //p' tools/lint/actionlint/Dockerfile)
           if ! [[ $image =~ ^rhysd/actionlint:[0-9.]+@sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error file=.github/actionlint/Dockerfile::expected one line 'FROM rhysd/actionlint:<version>@sha256:<digest>', found: $image"
+            echo "::error file=tools/lint/actionlint/Dockerfile::expected one line 'FROM rhysd/actionlint:<version>@sha256:<digest>', found: $image"
             exit 1
           fi
           docker run --rm -v "$GITHUB_WORKSPACE:/repo:ro" -w /repo "$image" -color
@@ -119,7 +119,7 @@ jobs:
       - name: Bash scripts
         # The scripts the release workflows call, with shellcheck from the same actionlint image.
         run: |
-          image=$(sed -n 's/^FROM //p' .github/actionlint/Dockerfile)
+          image=$(sed -n 's/^FROM //p' tools/lint/actionlint/Dockerfile)
           docker run --rm -v "$GITHUB_WORKSPACE:/repo:ro" -w /repo --entrypoint shellcheck "$image" .github/scripts/*.sh
 
       - name: PowerShell scripts
@@ -137,9 +137,9 @@ jobs:
         # repository keeps is in .github/zizmor.yml, each with its reason. Offline: its online
         # checks call the GitHub API, and a hiccup there would fail CI over nothing in this repository.
         run: |
-          image=$(sed -n 's/^FROM //p' .github/zizmor/Dockerfile)
+          image=$(sed -n 's/^FROM //p' tools/lint/zizmor/Dockerfile)
           if ! [[ $image =~ ^ghcr\.io/zizmorcore/zizmor:[0-9.]+@sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error file=.github/zizmor/Dockerfile::expected one line 'FROM ghcr.io/zizmorcore/zizmor:<version>@sha256:<digest>', found: $image"
+            echo "::error file=tools/lint/zizmor/Dockerfile::expected one line 'FROM ghcr.io/zizmorcore/zizmor:<version>@sha256:<digest>', found: $image"
             exit 1
           fi
           docker run --rm -v "$GITHUB_WORKSPACE:/repo:ro" -w /repo "$image" --offline --format github .github/
