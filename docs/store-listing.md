@@ -81,15 +81,30 @@ Shows the speed of every mirror and a map of the finished parts
 | `assets/store/screenshot-downloading.png` | Four mirrors at once; a link to another version is skipped. |
 | `assets/store/screenshot-done.png` | Done: the checksum matches. |
 
-**Store logo:** 1:1 app tile icon (300 x 300): `assets/store/app-tile-300.png`
+**Store logos**
 
-**Search terms**
+| Field | File |
+|---|---|
+| 9:16 poster art (1440 x 2160), the main logo for Windows | `assets/store/poster-1440x2160.png` |
+| 1:1 box art (1080 x 1080) | `assets/store/box-art-1080.png` |
+| 1:1 app tile icon (300 x 300) | `assets/store/app-tile-300.png` |
+
+Trailers, the 16:9 super hero art, the Xbox images, the short title and the voice title: leave empty.
+
+**Short description** (at most 270 characters)
+
+```
+Download one file from several mirrors at once: faster, and checked first, so every link really serves the same file. Continues unfinished downloads from Firefox and aria2.
+```
+
+**Keywords** (at most 7, 21 words in all)
 
 ```
 download manager
 mirror
 parallel download
 resume download
+segmented download
 checksum
 aria2
 ```
