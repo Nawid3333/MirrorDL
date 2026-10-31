@@ -147,6 +147,7 @@ public sealed class Session
     {
         using var http = CreateClient();
         SetPhase(Phase.Checking);
+        Write($"MirrorDL {AppInfo.Version}", LogKind.Dim); // so a copied log says which version it came from
         Write($"Checking {Format.Plural(_mirrors.Count, "link")}...");
         await Task.WhenAll(_mirrors.Select(m => m.InspectAsync(http, ct)));
         if (!_mirrors.Any(m => m.Usable))

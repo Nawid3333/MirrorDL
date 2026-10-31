@@ -2,8 +2,18 @@
 // Copyright (C) 2026 Nawid Salehie
 
 using System.Globalization;
+using System.Reflection;
 
 namespace MirrorDL;
+
+/// <summary>About this build.</summary>
+public static class AppInfo
+{
+    /// <summary>The version from the git tag of a release build ("1.2.3"), or "0.0.0-dev" for a local build.</summary>
+    public static string Version { get; } =
+        typeof(AppInfo).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0]
+        ?? "0.0.0-dev";
+}
 
 /// <summary>Numbers, times and errors as short text.</summary>
 public static class Format

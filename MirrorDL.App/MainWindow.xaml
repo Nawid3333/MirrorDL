@@ -36,12 +36,20 @@
             <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
                 <Image x:Name="TitleBarIcon" Width="18" Height="18" />
                 <TextBlock Text="MirrorDL" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <TextBlock x:Name="VersionText" Style="{StaticResource Label}" VerticalAlignment="Center" />
                 <TextBlock Text="one file, many links, all at once" Style="{StaticResource Label}" VerticalAlignment="Center" />
             </StackPanel>
         </Grid>
 
         <ScrollViewer Grid.Row="1">
             <StackPanel Padding="20,0,20,20" Spacing="12">
+
+                <!-- Only in the GitHub version: the Store updates the Store version itself. -->
+                <InfoBar x:Name="UpdateBar" IsOpen="False" Severity="Informational" Title="A new version is available">
+                    <InfoBar.ActionButton>
+                        <Button Content="Download" Click="DownloadUpdate_Click" />
+                    </InfoBar.ActionButton>
+                </InfoBar>
 
                 <!-- What to download -->
                 <Border Style="{StaticResource Card}">
