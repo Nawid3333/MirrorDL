@@ -30,13 +30,14 @@ You need the Partner Center developer account; nothing has to be installed.
 1. GitHub > **Actions** > **Release** > **Run workflow**, with the latest release's version (like `1.1.0`).
    The run builds the Store package with the identity from step 1. Download its **release-files**
    artifact; it contains `MirrorDL-x64.msix`.
-2. Partner Center > the app > **Start your submission**, and fill in:
+2. Partner Center > the app > **Start your submission**, and fill in (every text and answer, ready to
+   copy: [store-listing.md](store-listing.md)):
    - **Pricing and availability:** free.
    - **Properties:** category Utilities & tools; privacy policy URL
      `https://github.com/Nawid3333/MirrorDL/blob/main/PRIVACY.md`.
    - **Age ratings:** the questionnaire. MirrorDL has no user content or chat.
    - **Packages:** upload `MirrorDL-x64.msix`.
-   - **Store listings:** description and screenshots (`assets/screenshot-*.png`).
+   - **Store listings:** description, screenshots and the 300 x 300 icon (`assets/store/`).
    - Partner Center asks why the package uses `runFullTrust`. An answer: *"MirrorDL is a desktop
      download manager. It saves downloads in folders the user chooses and continues unfinished
      downloads of other programs (.part files of Firefox, aria2), which needs normal access to files."*
