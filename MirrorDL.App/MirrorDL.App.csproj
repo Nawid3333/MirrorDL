@@ -16,6 +16,9 @@
     <EnableMsixTooling>true</EnableMsixTooling>
     <!-- Brings the Windows App SDK runtime along, so nothing has to be installed. -->
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <!-- Lets GitHub's dependency graph read the packages on Linux (it only restores, never builds
+         there), so Dependabot alerts cover the Windows App SDK too. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
