@@ -20,16 +20,21 @@ The texts and answers for the app's Partner Center submission, ready to copy. Th
 
 ## Age ratings
 
-Choose **All other app types** (MirrorDL is neither a game nor a social or communication app), then
-answer the questionnaire:
+The IARC questionnaire. App type: **All other app types** (MirrorDL is neither a game nor a social or
+communication app). Then every question is **No**:
 
 | Question | Answer |
 |---|---|
-| Violence, sexual content, bad language, drugs, gambling, fear | No |
-| Users can talk to each other or share content (chat, voice, uploads) | No |
-| Shares the user's location | No |
-| Digital purchases | No |
-| Unrestricted internet access | **Yes**: it downloads from any link the user enters. This adds the notice "Unrestricted Internet" to the listing; it doesn't raise the age rating. |
+| Rating-relevant content (sex, violence, language) in the app package | No |
+| Users can talk to each other or share pictures or audio | No |
+| Offers or promotes content that is not part of the download (like films, products, songs, AI content, news) | No: it offers no content of its own, it only downloads what the user links to |
+| Promotes or sells age-restricted products or activities | No |
+| Shares the user's current location with other users | No |
+| Users can buy digital goods | No |
+| Payouts, gift cards, play-to-earn, crypto rewards, NFTs | No |
+| Is a web browser or a search engine | No: it shows no web pages and searches nothing |
+| Mainly a news or education product | No |
+| Uses ratings from a rating board directly, or ships on physical media | No |
 
 ## Packages
 
