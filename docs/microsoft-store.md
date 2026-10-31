@@ -78,21 +78,24 @@ GitHub release; fix it and re-run that job.
 
 ## Knowing where a release is
 
-Every release gets an issue, **Release vX.Y.Z**, assigned to the repository's owner, so GitHub
-tells you about it. It lists the steps and the workflows tick them as they happen:
+**On the release's page.** Its notes end with a short list that the workflows keep up to date:
 
-- [x] GitHub release published, with both downloads checked
-- [x] Submitted to the Microsoft Store
-- [ ] Certified and live in the Microsoft Store
+- ✅ GitHub: published, both downloads checked - 2026-11-01
+- ✅ Microsoft Store: submitted - 2026-11-01
+- ⏳ Microsoft Store: in certification (hours to a few days)
 
-**When every step is ticked, the issue closes itself: the version is out everywhere.** The last step
-takes Microsoft hours to a few days; **Store status** (`store-status.yml`) asks the Store every 3
-hours while a release waits for it (also from the Actions tab, **Run workflow**).
+Once the last line says **✅ Microsoft Store: certified and live**, the version is out everywhere.
+Certification takes Microsoft hours to a few days; **Store status** (`store-status.yml`) asks the
+Store every 3 hours while a release waits for it (also from the Actions tab, **Run workflow**).
 
-When something fails, the issue gets the label `release-failed` and a comment that says what and
-links to the run. What fails on the way by itself (a download, signing in, an upload) is tried
-again first; a submission only if none of this version is under way yet, since a new one would
-delete it. What gets reported:
+**An issue only when something fails.** Its line turns ❌, and the issue **Release vX.Y.Z: a step
+failed** opens, labeled `release-failed` and assigned to the repository's owner, so GitHub tells
+you. It says what failed and links to the run; the same failure is said once. When nothing is ❌
+anymore (a re-run went through, say), the issue closes itself.
+
+What fails on the way by itself (a download, signing in, an upload) is tried again first; a
+submission only if none of this version is under way yet, since a new one would delete it. What
+gets an issue:
 
 - the release files couldn't be built, or the published downloads don't pass the check (they must
   download, be whole, and hold their program);

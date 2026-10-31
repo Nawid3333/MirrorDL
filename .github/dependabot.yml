@@ -81,10 +81,11 @@ updates:
       actions:
         update-types: [minor, patch]
 
-  # The FROM lines of .github/actionlint/Dockerfile and .github/zizmor/Dockerfile: ci.yml runs
-  # those images. Dependabot updates a Dockerfile's FROM line, but not a docker:// line in a workflow.
+  # The FROM lines of tools/lint/actionlint/Dockerfile and tools/lint/zizmor/Dockerfile: ci.yml runs
+  # those images. Dependabot updates a Dockerfile's FROM line, but not a docker:// line in a workflow -
+  # and not a Dockerfile under .github/ either: its pull request for one was refused there.
   - package-ecosystem: docker
-    directories: [/.github/actionlint, /.github/zizmor]
+    directories: [/tools/lint/actionlint, /tools/lint/zizmor]
     schedule:
       interval: weekly
     cooldown:
