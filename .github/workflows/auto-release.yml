@@ -60,16 +60,16 @@ jobs:
           range=${last:+$last..}$SHA
           echo "Last release: ${last:-none}; looking at $range"
 
-          bump=none
+          bump='none'
           while IFS= read -r -d '' message; do
             subject=${message%%$'\n'*}
             if [[ $subject =~ ^[a-z]+(\([^\)]*\))?!: ]] || grep -qE '^BREAKING[ -]CHANGE:' <<< "$message"; then
-              bump=major
+              bump='major'
               break
             elif [[ $subject =~ ^feat(\([^\)]*\))?: ]]; then
-              bump=minor
+              bump='minor'
             elif [[ $subject =~ ^(fix|perf)(\([^\)]*\))?: ]] && [ "$bump" = none ]; then
-              bump=patch
+              bump='patch'
             fi
           done < <(git log --format='%B%x00' "$range")
 
