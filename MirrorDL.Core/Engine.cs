@@ -20,14 +20,18 @@ sealed class WriteError(IOException inner) : Exception(inner.Message, inner);
 /// <summary>
 /// Downloads the missing ranges of one file from several identical links at once. Every connection works
 /// on a segment of its own; a connection without work takes a free range or splits the biggest unfinished
-/// segment in half, so fast links keep taking work over from slow ones until the very end.
+/// segment in half, so fast links keep taking work over from slow ones until the very end. How many
+/// connections each link gets, <see cref="Tuner"/> decides; <paramref name="maxConnections"/> and
+/// <paramref name="perLink"/> are limits on top, null for none.
 /// </summary>
 sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable<(long Start, long End)> missing,
-                    IReadOnlyList<Mirror> mirrors, int maxConnections, int perServer)
+                    IReadOnlyList<Mirror> mirrors, int? maxConnections, int? perLink)
 {
     public static readonly TimeSpan StallTimeout = TimeSpan.FromSeconds(60);
     const int BufferSize = 256 * 1024;
     const long MinSplit = 1 << 20;
+
+    enum Next { Retry, Stop, Left }
 
     sealed class Segment(long start, long end)
     {
@@ -40,6 +44,7 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
     readonly List<(long Start, long End)> _free = Ranges.Normalize(missing);
     readonly List<Segment> _active = [];
     readonly List<Task> _workers = [];
+    readonly int _maxTotal = maxConnections ?? int.MaxValue;
     CancellationTokenSource? _stop;
 
     /// <summary>Why writing to the file failed, if it did; the download then stopped.</summary>
@@ -65,12 +70,13 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
     /// <summary>Runs until the file is complete, every link failed, or <paramref name="ct"/> is cancelled.</summary>
     public async Task<bool> RunAsync(Action tick, CancellationToken ct)
     {
-        foreach (var m in mirrors) m.Cap = perServer;
+        var tuner = new Tuner(mirrors, perLink ?? Tuner.MaxPerLink, _maxTotal);
         using var stop = _stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
         try
         {
             while (!IsComplete && !ct.IsCancellationRequested && WriteFailure == null)
             {
+                tuner.Update(Environment.TickCount64, RemainingBytes);
                 StartWorkers(stop.Token);
                 if (_workers.Count == 0) break; // every link failed
                 tick();
@@ -88,20 +94,21 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
     }
 
     /// <summary>
-    /// Fills up to <c>maxConnections</c>, taking turns between the links. A link gets one connection until
-    /// data has arrived over it, so that a host refusing extra connections can't get the whole link dropped.
+    /// Gives every link the connections it may have, taking turns between the links up to the total limit.
+    /// A link gets one connection until data has arrived over it, so that a host refusing extra connections
+    /// can't get the whole link dropped.
     /// </summary>
     void StartWorkers(CancellationToken ct)
     {
         _workers.RemoveAll(t => t.IsCompleted);
         int running = mirrors.Sum(m => Volatile.Read(ref m.Workers));
         bool added = true;
-        while (added && running < maxConnections)
+        while (added && running < _maxTotal)
         {
             added = false;
             foreach (var m in mirrors)
             {
-                if (running >= maxConnections) break;
+                if (running >= _maxTotal) break;
                 int allowed = Volatile.Read(ref m.LastData) == 0 ? 1 : m.Cap;
                 if (!m.Usable || Volatile.Read(ref m.Workers) >= allowed) continue;
                 Interlocked.Increment(ref m.Workers);
@@ -116,10 +123,16 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
     {
         var buffer = new byte[BufferSize];
         int failures = 0;
+        bool counted = true; // still in m.Workers
         try
         {
             while (m.Usable && !ct.IsCancellationRequested)
             {
+                if (TryLeave(m))
+                {
+                    counted = false;
+                    return;
+                }
                 var segment = Take();
                 if (segment == null)
                 {
@@ -128,15 +141,21 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
                     continue;
                 }
                 Exception? error = null;
+                bool stay = true;
                 try
                 {
-                    await FetchAsync(m, segment, buffer, ct);
+                    stay = await FetchAsync(m, segment, buffer, ct);
                 }
                 catch (Exception e)
                 {
                     error = e;
                 }
-                Release(segment);
+                Release(segment); // what this connection didn't write goes back for others to take
+                if (!stay)
+                {
+                    counted = false;
+                    return;
+                }
                 if (error is WriteError write)
                 {
                     lock (_lock) WriteFailure ??= (IOException)write.InnerException!;
@@ -144,9 +163,14 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
                     return;
                 }
                 if (error == null)
+                {
                     failures = 0;
-                else if (ct.IsCancellationRequested || !await RecoverAsync(m, error, ++failures, ct))
-                    return;
+                    continue;
+                }
+                if (ct.IsCancellationRequested) return;
+                var next = await RecoverAsync(m, error, ++failures, ct);
+                if (next == Next.Left) counted = false;
+                if (next != Next.Retry) return;
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -154,12 +178,26 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
         }
         finally
         {
-            Interlocked.Decrement(ref m.Workers);
+            if (counted) Interlocked.Decrement(ref m.Workers);
         }
     }
 
-    /// <summary>Decides what to do after a failed request: true = try again after a pause, false = stop this connection.</summary>
-    async Task<bool> RecoverAsync(Mirror m, Exception error, int failures, CancellationToken ct)
+    /// <summary>
+    /// Leaves the link's connections (true) when it has more than it may have: then this connection ends.
+    /// Counted down at once, so that of several connections asking at the same time only as many leave as needed.
+    /// </summary>
+    static bool TryLeave(Mirror m)
+    {
+        while (true)
+        {
+            int workers = Volatile.Read(ref m.Workers);
+            if (workers <= Volatile.Read(ref m.Cap)) return false;
+            if (Interlocked.CompareExchange(ref m.Workers, workers - 1, workers) == workers) return true;
+        }
+    }
+
+    /// <summary>Decides what to do after a failed request: try again after a pause, or end this connection.</summary>
+    async Task<Next> RecoverAsync(Mirror m, Exception error, int failures, CancellationToken ct)
     {
         string message = error is OperationCanceledException ? "no data for 60 s" : Format.Short(error);
         m.LastError = message;
@@ -169,7 +207,7 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
         if (source is { Fatal: true })
         {
             m.Problem = message;
-            return false;
+            return Next.Stop;
         }
         if (source is { Status: > 0 })
         {
@@ -177,9 +215,11 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
                 && Environment.TickCount64 - Volatile.Read(ref m.LastData) < 5000;
             if (othersWork)
             {
-                // The link works but doesn't allow this many connections: go on with one fewer.
-                lock (m) m.Cap = Math.Max(1, Math.Min(m.Cap, Volatile.Read(ref m.Workers) - 1));
-                return false;
+                // The link works but doesn't allow this many connections: this one ends, and the link never
+                // gets more than it has left. Counted down first, so no other connection leaves as well.
+                int left = Interlocked.Decrement(ref m.Workers);
+                lock (m) m.Cap = m.Ceiling = Math.Max(1, Math.Min(m.Cap, left));
+                return Next.Left;
             }
             // A link that never worked is dropped right away; one that did may just still count our
             // previous connection as open, so it gets retried like a network error.
@@ -187,7 +227,7 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
             if (!workedBefore && source.Status is not (408 or 429 or 500 or 502 or 503 or 504))
             {
                 m.Problem = message;
-                return false;
+                return Next.Stop;
             }
         }
         int errors = Interlocked.Increment(ref m.Errors);
@@ -195,17 +235,18 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
         if (errors >= limit)
         {
             m.Problem = $"gave up after {errors} errors ({message})";
-            return false;
+            return Next.Stop;
         }
         await Task.Delay(TimeSpan.FromSeconds(Math.Min(30, 1 << Math.Min(failures, 5))), ct);
-        return true;
+        return Next.Retry;
     }
 
-    async Task FetchAsync(Mirror m, Segment segment, byte[] buffer, CancellationToken ct)
+    /// <summary>Downloads into the segment until it is done or taken over (true), or this connection leaves the link (false).</summary>
+    async Task<bool> FetchAsync(Mirror m, Segment segment, byte[] buffer, CancellationToken ct)
     {
         long from, to;
         lock (_lock) (from, to) = (segment.Pos, segment.End - 1);
-        if (from > to) return;
+        if (from > to) return true;
 
         using var stall = CancellationTokenSource.CreateLinkedTokenSource(ct);
         stall.CancelAfter(StallTimeout);
@@ -224,9 +265,10 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
         await using var body = await response.Content.ReadAsStreamAsync(stall.Token);
         while (true)
         {
+            if (TryLeave(m)) return false;
             long left;
             lock (_lock) left = segment.End - segment.Reserved;
-            if (left <= 0) return;
+            if (left <= 0) return true;
             stall.CancelAfter(StallTimeout);
             int read = await body.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, left)), stall.Token);
             if (read == 0) throw new SourceError("connection closed early");
@@ -251,7 +293,7 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
                 lock (_lock) segment.Pos = at + take;
                 m.GotData(take);
             }
-            if (take < read) return; // another connection took over the rest
+            if (take < read) return true; // another connection took over the rest
         }
     }
 

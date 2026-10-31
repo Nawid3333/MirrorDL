@@ -8,6 +8,7 @@ p = argparse.ArgumentParser()
 p.add_argument("--port", type=int, required=True)
 p.add_argument("--file", required=True)
 p.add_argument("--rate", type=float, default=0, help="bytes/s per connection (0 = unlimited)")
+p.add_argument("--total-rate", type=float, default=0, help="bytes/s for all connections together (0 = unlimited)")
 p.add_argument("--fail", type=float, default=0, help="chance per 64 KiB to drop the connection")
 p.add_argument("--max-conns", type=int, default=0, help="answer 503 above this many connections")
 p.add_argument("--limit-status", type=int, default=503, help="status sent above --max-conns")
@@ -17,6 +18,19 @@ a = p.parse_args()
 size = os.path.getsize(a.file)
 active = 0
 lock = threading.Lock()
+line_lock = threading.Lock()
+line_free = 0.0  # when the line all connections share is free again (--total-rate)
+
+
+def take_line(count):
+    """Waits for the turn of count bytes on the line all connections share."""
+    global line_free
+    with line_lock:
+        start = max(time.time(), line_free)
+        line_free = start + count / a.total_rate
+    delay = start - time.time()
+    if delay > 0:
+        time.sleep(delay)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -75,6 +89,8 @@ class Handler(BaseHTTPRequestHandler):
                 if a.fail and random.random() < a.fail:
                     self.close_connection = True
                     return
+                if a.total_rate:
+                    take_line(len(chunk))
                 self.wfile.write(chunk)
                 left -= len(chunk)
                 sent += len(chunk)

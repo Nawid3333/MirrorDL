@@ -37,7 +37,8 @@ public sealed class Mirror(int index, Uri url)
     // Live numbers, updated by several connections at once.
     public long Bytes;
     public int Workers;
-    public int Cap;
+    /// <summary>How many connections this link may have now (<see cref="Tuner"/> decides), and at most.</summary>
+    public int Cap, Ceiling;
     public int Errors;
     public long LastData;
     public long LastErrorAt;

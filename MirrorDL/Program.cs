@@ -152,8 +152,11 @@ static class Program
 
         Options:
           -o, --out <folder>         save here (default: Downloads, or next to the .part file)
-          -c, --connections <n>      connections in total (default 16)
-          -m, --max-per-server <n>   connections per link (default 8)
+          -c, --connections <n>      at most n connections in total (default: no limit)
+          -m, --max-per-server <n>   at most n connections per link (default: 16)
+
+        mirrordl finds the number of connections by itself: it adds more as long as they make the
+        download faster, and stops where a server or the internet line is the limit.
 
         All links must lead to the same file: mirrordl compares their size and a few pieces of
         content and skips links that differ. It continues unfinished downloads of mirrordl,

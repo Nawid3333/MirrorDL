@@ -55,7 +55,7 @@ public sealed partial class MainWindow : Window
 
     async void Start_Click(object sender, RoutedEventArgs e)
     {
-        var job = new Job { Connections = Number(ConnectionsBox, 16), PerServer = Number(PerLinkBox, 8) };
+        var job = new Job();
         var ignored = new List<string>();
         foreach (string line in LinksBox.Text.Split('\r', '\n')) Input.Add(line, job, ignored);
 
@@ -276,7 +276,7 @@ public sealed partial class MainWindow : Window
         StartButton.IsEnabled = !running;
         PauseButton.IsEnabled = running;
         LinksBox.IsReadOnly = running;
-        foreach (var control in new Control[] { SaveToBox, PartBox, BrowseFolderButton, BrowsePartButton, ConnectionsBox, PerLinkBox })
+        foreach (var control in new Control[] { SaveToBox, PartBox, BrowseFolderButton, BrowsePartButton })
             control.IsEnabled = !running;
     }
 
@@ -373,9 +373,6 @@ public sealed partial class MainWindow : Window
         if (text.Length == 0) return;
         LinksBox.Text = LinksBox.Text.Trim().Length == 0 ? text : LinksBox.Text.TrimEnd() + "\r" + text;
     }
-
-    static int Number(NumberBox box, int fallback) =>
-        double.IsNaN(box.Value) ? fallback : (int)Math.Clamp(box.Value, 1, 64);
 
     /// <summary>A comfortable size that still fits on the screen, centered.</summary>
     void PlaceWindow()

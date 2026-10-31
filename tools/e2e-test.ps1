@@ -9,7 +9,8 @@
 # Covers: good and bad links together (different content, different size, dead, one that allows a
 # single connection and answers 403 to more, one that drops connections), pasted input, a Firefox
 # .part file, an unfinished file of another file, a hard kill and resume, a server without range
-# requests, and - when aria2c is given or on the PATH - a download that aria2 started.
+# requests, connections the tuner tries and takes back, and - when aria2c is given or on the PATH -
+# a download that aria2 started.
 param(
     [Parameter(Mandatory)] [string] $Exe,
     [string] $Aria2 = (Get-Command aria2c -ErrorAction SilentlyContinue)?.Source
@@ -68,6 +69,7 @@ try {
     New-TestFile other.bin (24MB) 2
     New-TestFile small.bin (2MB) 3
     New-TestFile empty.bin 0 4
+    New-TestFile big.bin (64MB) 5
     $hash = Hash (Join-Path $work test.bin)
 
     Start-Mirror 18001 test.bin '--rate 4000000'
@@ -79,6 +81,7 @@ try {
     Start-Mirror 18007 test.bin '--rate 100000'
     Start-Mirror 18008 empty.bin
     Start-Mirror 18009 empty.bin
+    Start-Mirror 18010 big.bin '--rate 1000000 --total-rate 4000000'
 
     # Good and bad links together; only the good ones may be used.
     $dir = New-Folder mixed
@@ -159,6 +162,12 @@ try {
     $dir = New-Folder oneconnection
     $run = Invoke-Mirrordl @('-o', $dir, (Url 18005), $hash)
     Test-Case 'server that allows one connection' { $run.Code -eq 0 -and (Hash "$dir\test.bin") -eq $hash } $run
+
+    # A server whose connections share one speed limit: the 4 connections a link starts with already reach
+    # it, so the 4 more that are tried bring nothing and leave again in the middle of their parts.
+    $dir = New-Folder fullserver
+    $run = Invoke-Mirrordl @('-o', $dir, 'http://127.0.0.1:18010/big.bin', (Hash "$work\big.bin"))
+    Test-Case 'connections tried and taken back' { $run.Code -eq 0 -and (Hash "$dir\big.bin") -eq (Hash "$work\big.bin") } $run
 
     # aria2 continued a Firefox file and stopped: its pieces are all over the file.
     if ($Aria2) {

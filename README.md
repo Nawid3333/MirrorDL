@@ -20,6 +20,9 @@ Windows 10 and 11, as a window app and as a terminal program.
 
 - **All links at once.** Each link gets several connections. Faster links keep taking over work
   from slower ones until the end.
+- **Finds the best number of connections by itself.** It adds connections to a link as long as
+  they make the whole download faster, and stops where the server or your internet line is the
+  limit, at most 16 per link. Nothing to set.
 - **Checks the links first.** Links with a different size are skipped. MirrorDL also compares
   64 KB pieces from several places in the file across all links and skips links whose content
   differs, so you never get a file stitched together from two different versions.
@@ -77,8 +80,8 @@ mirrordl "C:\Users\me\Downloads\file.Ab12-xYz.iso.part" "https://a/file.iso"
 | Option | Meaning |
 |---|---|
 | `-o <folder>` | where to save (default: Downloads, or next to the unfinished file) |
-| `-c <n>` | connections in total (default 16) |
-| `-m <n>` | connections per link (default 8) |
+| `-c <n>` | at most n connections in total (default: no limit) |
+| `-m <n>` | at most n connections per link (default: 16) |
 
 Ctrl+C pauses. Run the same command again to continue.
 

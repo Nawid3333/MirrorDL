@@ -15,8 +15,9 @@ public sealed class Job
     public List<string> Checksums { get; } = [];
     public string? PartFile { get; set; }
     public string? OutDir { get; set; }
-    public int Connections { get; set; } = 16;
-    public int PerServer { get; set; } = 8;
+    /// <summary>Limits on the connections, in total and per link; null leaves it all to <see cref="Tuner"/>.</summary>
+    public int? Connections { get; set; }
+    public int? PerServer { get; set; }
 }
 
 /// <summary>A problem the user can fix: shown as a plain message, without a stack trace.</summary>
@@ -263,8 +264,9 @@ public sealed class Session
         Write($"Save to:   {target.FinalDir}");
         foreach (string hex in _job.Checksums)
             Write($"Checksum:  {Checksum.Algorithm(hex)!.Value.Name} {hex}");
-        Write($"Using {Format.Plural(sources.Count, "link")} with up to " +
-              $"{Math.Min(_job.Connections, sources.Count * _job.PerServer)} connections.");
+        int most = Math.Min(_job.Connections ?? int.MaxValue, sources.Count * (_job.PerServer ?? Tuner.MaxPerLink));
+        Write($"Using {Format.Plural(sources.Count, "link")}, with more connections as long as that makes it faster " +
+              $"(at most {most}).");
 
         PrepareFile(target.PartPath);
         new PartState(size, missing).Save(target.StatePath); // before any data is written
