@@ -39,6 +39,24 @@ public static class Ranges
         if (pos < size) result.Add((pos, size));
         return result;
     }
+
+    /// <summary>The parts that both normalized lists cover.</summary>
+    public static List<(long Start, long End)> Intersect(IReadOnlyList<(long Start, long End)> a, IReadOnlyList<(long Start, long End)> b)
+    {
+        var result = new List<(long Start, long End)>();
+        for (int i = 0, j = 0; i < a.Count && j < b.Count;)
+        {
+            long start = Math.Max(a[i].Start, b[j].Start), end = Math.Min(a[i].End, b[j].End);
+            if (start < end) result.Add((start, end));
+            if (a[i].End < b[j].End) i++;
+            else j++;
+        }
+        return result;
+    }
+
+    /// <summary>The parts of normalized <paramref name="a"/> that <paramref name="b"/> doesn't cover.</summary>
+    public static List<(long Start, long End)> Subtract(IReadOnlyList<(long Start, long End)> a, IEnumerable<(long Start, long End)> b) =>
+        Intersect(a, Invert(Normalize(b), long.MaxValue));
 }
 
 /// <summary>
@@ -156,21 +174,29 @@ static class PartFinder
     // Firefox puts 8 random characters into the name of its unfinished file and leaves an empty file
     // with the real name next to it: "setup.Ab3-xY_z.exe.part" next to "setup.exe".
     static readonly Regex FirefoxToken = new("^[A-Za-z0-9_-]{8}$");
+    // Browsers number a second download of the same name: "setup(1).exe", "setup (2).exe".
+    static readonly Regex CopyNumber = new(@" ?\(\d{1,4}\)(?=\.|$)");
 
-    /// <summary>The names an unfinished file can stand for: without ".part" and, for Firefox, without its random piece.</summary>
-    public static IEnumerable<string> FinalNames(string fileName)
+    /// <summary>
+    /// The names an unfinished file can stand for: without ".part", for Firefox without its random piece, and -
+    /// with <paramref name="copies"/> - without the number a browser gives a second download of the same name.
+    /// </summary>
+    public static IEnumerable<string> FinalNames(string fileName, bool copies = true)
     {
+        var names = new List<string>();
         if (!fileName.EndsWith(".part", StringComparison.OrdinalIgnoreCase))
+            names.Add(fileName); // aria2 can also write straight into the final name
+        else
         {
-            yield return fileName; // aria2 can also write straight into the final name
-            yield break;
+            string name = fileName[..^".part".Length];
+            string[] pieces = name.Split('.');
+            for (int i = 1; i < pieces.Length - 1; i++)
+                if (FirefoxToken.IsMatch(pieces[i]))
+                    names.Add(string.Join('.', pieces.Where((_, j) => j != i)));
+            names.Add(name);
         }
-        string name = fileName[..^".part".Length];
-        string[] pieces = name.Split('.');
-        for (int i = 1; i < pieces.Length - 1; i++)
-            if (FirefoxToken.IsMatch(pieces[i]))
-                yield return string.Join('.', pieces.Where((_, j) => j != i));
-        yield return name;
+        if (copies) names.AddRange(names.Select(n => CopyNumber.Replace(n, "", 1)).ToList());
+        return names.Distinct();
     }
 
     /// <summary>
@@ -182,21 +208,29 @@ static class PartFinder
     {
         if (!partPath.EndsWith(".part", StringComparison.OrdinalIgnoreCase)) return false;
         string dir = Path.GetDirectoryName(partPath)!;
-        var names = FinalNames(Path.GetFileName(partPath)).ToList();
+        var names = FinalNames(Path.GetFileName(partPath), copies: false).ToList();
         return names.Count > 1 || names.Any(n => new FileInfo(Path.Combine(dir, n)) is { Exists: true, Length: 0 });
     }
 
-    /// <summary>The final name for an unfinished file; a link's file name or Firefox's empty placeholder confirms which one.</summary>
-    public static string FinalName(string partPath, IReadOnlyCollection<string> serverNames)
+    /// <summary>
+    /// The final name for an unfinished file; a link's file name or Firefox's empty placeholder confirms which
+    /// one. Without either, <paramref name="otherwise"/> if given, else the file's own name without ".part".
+    /// </summary>
+    public static string FinalName(string partPath, IReadOnlyCollection<string> serverNames, string? otherwise = null)
     {
-        string dir = Path.GetDirectoryName(partPath)!;
-        var names = FinalNames(Path.GetFileName(partPath)).ToList();
-        return names.FirstOrDefault(n => serverNames.Contains(n, StringComparer.OrdinalIgnoreCase))
-            ?? names.FirstOrDefault(n => new FileInfo(Path.Combine(dir, n)) is { Exists: true, Length: 0 })
-            ?? names[^1];
+        string dir = Path.GetDirectoryName(partPath)!, fileName = Path.GetFileName(partPath);
+        var own = FinalNames(fileName, copies: false).ToList();
+        return FinalNames(fileName).FirstOrDefault(n => serverNames.Contains(n, StringComparer.OrdinalIgnoreCase))
+            ?? own.FirstOrDefault(n => new FileInfo(Path.Combine(dir, n)) is { Exists: true, Length: 0 })
+            ?? otherwise
+            ?? own[^1];
     }
 
-    /// <summary>Unfinished downloads of any of the names in a folder, the most promising first.</summary>
+    /// <summary>Whether an unfinished file has one of the names itself, not only once a browser's copy number is taken off.</summary>
+    public static bool HasName(string partPath, IReadOnlyCollection<string> names) =>
+        FinalNames(Path.GetFileName(partPath), copies: false).Any(n => names.Contains(n, StringComparer.OrdinalIgnoreCase));
+
+    /// <summary>Unfinished downloads of any of the names (or numbered copies of them) in a folder, the most promising first.</summary>
     public static List<string> Find(string dir, IReadOnlyCollection<string> names)
     {
         if (!Directory.Exists(dir)) return [];

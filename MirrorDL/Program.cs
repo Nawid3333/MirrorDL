@@ -92,14 +92,25 @@ static class Program
             view = null;
         }
 
-        session.Log += (text, kind) => { lock (gate) Ui.Line(text, kind); };
+        session.Log += (text, kind) =>
+        {
+            lock (gate)
+            {
+                // A message in the middle of a progress block goes below it, and the block starts again under
+                // the message - otherwise the next redraw would write over it.
+                bool live = view != null;
+                EndView();
+                Ui.Line(text, kind);
+                if (live) view = new ProgressView();
+            }
+        };
         session.LinksChecked += () => { lock (gate) Ui.PrintLinks(session.Mirrors); };
         session.PhaseChanged += phase =>
         {
             lock (gate)
             {
                 EndView();
-                if (phase is Phase.Downloading or Phase.Verifying)
+                if (phase is Phase.Copying or Phase.Downloading or Phase.Verifying)
                 {
                     Console.WriteLine();
                     view = new ProgressView();
@@ -147,8 +158,8 @@ static class Program
 
         Usage:
           mirrordl                       asks you to paste the links
-          mirrordl [options] <input>...  inputs: links, a .part file to continue, a .txt file with
-                                         links, a checksum (MD5/SHA-1/SHA-256/SHA-512), a folder
+          mirrordl [options] <input>...  inputs: links, unfinished files to continue (any name), a .txt
+                                         file with links, a checksum (MD5/SHA-1/SHA-256/SHA-512), a folder
 
         Options:
           -o, --out <folder>         save here (default: Downloads, or next to the .part file)
@@ -160,6 +171,7 @@ static class Program
 
         All links must lead to the same file: mirrordl compares their size and a few pieces of
         content and skips links that differ. It continues unfinished downloads of mirrordl,
-        Firefox (.part) and aria2 (.aria2). Ctrl+C pauses; run it again to continue.
+        Firefox (.part) and aria2 (.aria2); with several of the same file, it checks each one and
+        puts together what they hold. Ctrl+C pauses; run it again to continue.
         """;
 }

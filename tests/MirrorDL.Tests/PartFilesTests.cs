@@ -18,6 +18,23 @@ public class PartFinderTests
     public void FinalNames_of_a_file_without_part_is_the_file_itself() =>
         Assert.Equal(["data.bin"], PartFinder.FinalNames("data.bin"));
 
+    [Theory]
+    [InlineData("setup(1).exe.part")]
+    [InlineData("setup (2).exe.part")]
+    [InlineData("setup(1).Ab3-xY_z.exe.part")]
+    public void FinalNames_include_the_name_without_the_number_of_a_second_download(string part)
+    {
+        Assert.Contains("setup.exe", PartFinder.FinalNames(part));
+        Assert.DoesNotContain("setup.exe", PartFinder.FinalNames(part, copies: false));
+    }
+
+    [Fact]
+    public void HasName_is_only_for_the_name_itself_not_a_numbered_copy()
+    {
+        Assert.True(PartFinder.HasName(@"C:\d\setup.Ab3-xY_z.exe.part", ["setup.exe"]));
+        Assert.False(PartFinder.HasName(@"C:\d\setup(1).Ab3-xY_z.exe.part", ["setup.exe"]));
+    }
+
     [Fact]
     public void FinalName_prefers_the_name_a_link_gives()
     {
@@ -41,6 +58,16 @@ public class PartFinderTests
         using var folder = new TempFolder();
         string part = folder.File("report.Zz9_Qq8w.pdf.part", 10);
         Assert.Equal("report.Zz9_Qq8w.pdf", PartFinder.FinalName(part, []));
+        Assert.Equal("report.pdf", PartFinder.FinalName(part, [], otherwise: "report.pdf"));
+    }
+
+    [Fact]
+    public void FinalName_of_a_numbered_copy_is_the_links_name_and_never_a_copy_number_dropped_by_guess()
+    {
+        using var folder = new TempFolder();
+        string part = folder.File("setup(1).Ab3-xY_z.exe.part", 10);
+        Assert.Equal("setup.exe", PartFinder.FinalName(part, ["setup.exe"]));
+        Assert.Equal("setup(1).Ab3-xY_z.exe", PartFinder.FinalName(part, []));
     }
 
     [Fact]
@@ -53,7 +80,19 @@ public class PartFinderTests
         Assert.True(PartFinder.IsFirefoxPart(folder.File("b.bin.part", 10)));
 
         Assert.False(PartFinder.IsFirefoxPart(folder.File("c.bin.part", 10)));  // no sign of Firefox
+        Assert.False(PartFinder.IsFirefoxPart(folder.File("c(1).bin.part", 10)));
         Assert.False(PartFinder.IsFirefoxPart(folder.File("d.iso", 10)));       // not a .part file
+    }
+
+    [Fact]
+    public void Find_also_finds_numbered_copies_of_the_download()
+    {
+        using var folder = new TempFolder();
+        string own = folder.File("a.Ab12Cd34.bin.part", 10);
+        string copy = folder.File("a(1).Zz9_Qq8w.bin.part", 10);
+        string spaced = folder.File("a (2).bin.part", 10);
+        folder.File("ab(1).bin.part", 10);
+        Assert.Equal(new[] { own, copy, spaced }.Order(StringComparer.Ordinal), PartFinder.Find(folder.Path, ["a.bin"]).Order(StringComparer.Ordinal));
     }
 
     [Fact]

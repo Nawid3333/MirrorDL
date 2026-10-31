@@ -29,4 +29,22 @@ public class RangesTests
 
     [Fact]
     public void Sum_adds_up_the_lengths() => Assert.Equal(25, Ranges.Sum([(0, 10), (20, 35)]));
+
+    [Fact]
+    public void Intersect_keeps_what_both_cover()
+    {
+        List<(long Start, long End)> expected = [(5, 10), (20, 25), (30, 32), (34, 40)];
+        Assert.Equal(expected, Ranges.Intersect([(0, 10), (20, 32), (34, 50)], [(5, 25), (30, 40)]));
+        Assert.Empty(Ranges.Intersect([(0, 10)], [(10, 20)]));
+        Assert.Empty(Ranges.Intersect([], [(0, 10)]));
+    }
+
+    [Fact]
+    public void Subtract_removes_what_the_second_covers()
+    {
+        List<(long Start, long End)> expected = [(0, 5), (25, 30), (40, 50)];
+        Assert.Equal(expected, Ranges.Subtract([(0, 10), (20, 30), (35, 50)], [(5, 25), (30, 40)]));
+        List<(long Start, long End)> all = [(0, 10)];
+        Assert.Equal(all, Ranges.Subtract(all, []));
+    }
 }

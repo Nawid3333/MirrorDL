@@ -3,7 +3,7 @@
 
 namespace MirrorDL;
 
-/// <summary>Sorts pasted text and arguments into links, checksums, an unfinished file and an output folder.</summary>
+/// <summary>Sorts pasted text and arguments into links, checksums, unfinished files and an output folder.</summary>
 public static class Input
 {
     public static void Add(string line, Job job, List<string> ignored, bool allowFiles = true)
@@ -46,12 +46,12 @@ public static class Input
                 if (path.EndsWith(extension, StringComparison.OrdinalIgnoreCase) && File.Exists(path[..^extension.Length]))
                     path = path[..^extension.Length];
 
-            if (path.EndsWith(".part", StringComparison.OrdinalIgnoreCase) || File.Exists(path + ".aria2") || File.Exists(path + ".mirrordl"))
-                job.PartFile = path;
-            else if (path.EndsWith(".txt", StringComparison.OrdinalIgnoreCase))
+            // A .txt file holds links; any other file is an unfinished download of this file, whatever its name -
+            // it is compared with the links before anything of it is used.
+            if (path.EndsWith(".txt", StringComparison.OrdinalIgnoreCase) && !File.Exists(path + ".aria2") && !File.Exists(path + ".mirrordl"))
                 foreach (string line in File.ReadLines(path)) Add(line, job, ignored, allowFiles: false);
-            else
-                ignored.Add(path);
+            else if (!job.PartFiles.Contains(path, StringComparer.OrdinalIgnoreCase))
+                job.PartFiles.Add(path);
             return true;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)

@@ -30,9 +30,12 @@ Windows 10 and 11, as a window app and as a terminal program.
   - Firefox `.part` files, including Firefox's random names (`setup.Ab3-xY_z.exe.part`)
   - aria2 downloads: reads the `.aria2` control file to find the missing pieces
   - its own downloads, even after a crash or a power cut
+  - **several unfinished files of the same download at once**, also under other names: it
+    puts together what they hold and downloads only the rest
 
   Before continuing, it compares what is already on disk with the links. A file that doesn't
-  match is never changed.
+  match is never changed. Continuing reads only the progress file and a few pieces, not the
+  whole file, so even a 50 GB download goes on right away.
 - **Verifies the result** against a checksum (MD5, SHA-1, SHA-256, SHA-384 or SHA-512) if you
   paste one with the links.
 - **Shows the details:** percent, downloaded and remaining size, current and average speed, time
@@ -95,6 +98,23 @@ choose one yourself.
   Firefox or close Firefox first. **Don't cancel it in Firefox: that deletes the `.part` file.**
 - **aria2** writes pieces all over the file, so the file size says nothing about how much is done.
   MirrorDL reads the `.aria2` file to find the missing pieces. Stop aria2 first.
+
+### Several unfinished files of the same download
+
+Browsers download a file from the start to the end, so of two Firefox `.part` files of the same
+download the bigger one already holds everything the smaller one has. aria2 and MirrorDL download
+pieces all over the file, so their unfinished files can hold different parts. MirrorDL uses them all:
+
+1. It finds the unfinished files of the download in the save folder, also numbered copies like
+   `name(1).ext.part`. Files under other names you add yourself (several at once: one per line
+   in **Continue**, or drop them on the window).
+2. It compares each one with the links. A different file is left as it is.
+3. The one holding the most is continued; what the others hold beyond it is copied into it.
+   Copying on the disk is much faster than downloading.
+4. Only the rest is downloaded. At the end it lists the other files, which aren't needed anymore.
+
+A file from aria2 or MirrorDL needs its progress file (`.aria2` or `.mirrordl`) next to it, since
+only that tells which parts are downloaded. Without it, MirrorDL doesn't use the file.
 
 ## Limitations
 

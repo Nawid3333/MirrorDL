@@ -63,7 +63,7 @@ public class InputTests
         string part = folder.File("my file.Ab12Cd34.bin.part", 10);
         var job = new Job();
         Input.Add($"\"{part}\"", job, []);
-        Assert.Equal(part, job.PartFile);
+        Assert.Equal([part], job.PartFiles);
     }
 
     [Fact]
@@ -74,7 +74,7 @@ public class InputTests
         string control = folder.File("big.iso.aria2", 10);
         var job = new Job();
         Input.Add(control, job, []);
-        Assert.Equal(download, job.PartFile);
+        Assert.Equal([download], job.PartFiles);
     }
 
     [Fact]
@@ -88,5 +88,18 @@ public class InputTests
         Input.Add(list, job, []);
         Assert.Equal(folder.Path, job.OutDir);
         Assert.Equal(2, job.Urls.Count);
+    }
+
+    [Fact]
+    public void Any_other_dragged_in_file_is_an_unfinished_download_whatever_its_name_and_each_counts_once()
+    {
+        using var folder = new TempFolder();
+        string renamed = folder.File("my copy.bin", 10);
+        string part = folder.File("other.Ab12Cd34.bin.part", 10);
+        var job = new Job();
+        Input.Add(renamed, job, []);
+        Input.Add($"\"{part}\"", job, []);
+        Input.Add(renamed, job, []);
+        Assert.Equal([renamed, part], job.PartFiles);
     }
 }

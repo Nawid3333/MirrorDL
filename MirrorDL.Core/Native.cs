@@ -10,11 +10,17 @@ namespace MirrorDL;
 public static class Native
 {
     const uint FsctlSetSparse = 0x000900C4;
+    const uint FsctlQueryAllocatedRanges = 0x000940CF;
+    const int ErrorMoreData = 234;
     static readonly Guid DownloadsFolderId = new("374DE290-123F-4565-9164-39C4925E467B");
 
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool DeviceIoControl(SafeFileHandle device, uint code, ref byte input, int inputSize,
         IntPtr output, int outputSize, out int returned, IntPtr overlapped);
+
+    [DllImport("kernel32.dll", EntryPoint = "DeviceIoControl", SetLastError = true)]
+    static extern bool DeviceIoControlRanges(SafeFileHandle device, uint code, long[] input, int inputSize,
+        long[] output, int outputSize, out int returned, IntPtr overlapped);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool FlushFileBuffers(SafeFileHandle file);
@@ -46,6 +52,19 @@ public static class Native
         if (!OperatingSystem.IsWindows()) return;
         byte flag = sparse ? (byte)1 : (byte)0;
         DeviceIoControl(file, FsctlSetSparse, ref flag, 1, IntPtr.Zero, 0, out _, IntPtr.Zero);
+    }
+
+    /// <summary>
+    /// Whether the first <paramref name="length"/> bytes of a sparse file have parts that were never written: the
+    /// drive keeps no space for them. A file that isn't sparse has none. False when it can't tell.
+    /// </summary>
+    public static bool HasHoles(SafeFileHandle file, long length)
+    {
+        if (!OperatingSystem.IsWindows() || length <= 0) return false;
+        long[] query = [0, length], ranges = new long[4]; // (offset, length) pairs: room for two
+        if (!DeviceIoControlRanges(file, FsctlQueryAllocatedRanges, query, 16, ranges, ranges.Length * 8, out int returned, IntPtr.Zero))
+            return Marshal.GetLastWin32Error() == ErrorMoreData; // more pieces than fit: gaps between them
+        return returned != 16 || ranges[0] > 0 || ranges[0] + ranges[1] < length;
     }
 
     /// <summary>Makes sure what was written to the file is on the disk, not only in the cache.</summary>
