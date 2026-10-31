@@ -73,7 +73,9 @@ jobs:
             elif [[ $subject =~ ^(fix|perf)(\([^\)]*\))?: ]] && [ "$bump" = none ]; then
               bump='patch'
             fi
-          done < <(git log --format='%B%x00' "$range")
+          # -z ends every message with a NUL and nothing else; a %x00 in the format would be followed
+          # by git's own newline, so every message after the first would start with an empty line.
+          done < <(git log -z --format='%B' "$range")
 
           if [ "$bump" = none ]; then
             echo "No fix:, perf: or feat: commit since ${last:-the start}: nothing to release."
