@@ -10,14 +10,35 @@ namespace MirrorDL;
 public static class Native
 {
     const uint FsctlSetSparse = 0x000900C4;
+    const uint FsctlQueryAllocatedRanges = 0x000940CF;
     static readonly Guid DownloadsFolderId = new("374DE290-123F-4565-9164-39C4925E467B");
 
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool DeviceIoControl(SafeFileHandle device, uint code, ref byte input, int inputSize,
         IntPtr output, int outputSize, out int returned, IntPtr overlapped);
 
+    [DllImport("kernel32.dll", EntryPoint = "DeviceIoControl", SetLastError = true)]
+    static extern bool DeviceIoControlRanges(SafeFileHandle device, uint code, long[] input, int inputSize,
+        long[] output, int outputSize, out int returned, IntPtr overlapped);
+
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool FlushFileBuffers(SafeFileHandle file);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct ShFileOperation
+    {
+        public IntPtr Window;
+        public uint Function;
+        public string From;
+        public string? To;
+        public ushort Flags;
+        public int Aborted;
+        public IntPtr NameMappings;
+        public string? Title;
+    }
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    static extern int SHFileOperation(ref ShFileOperation operation);
 
     [DllImport("kernel32.dll")]
     static extern uint GetConsoleProcessList(uint[] processes, uint count);
@@ -46,6 +67,42 @@ public static class Native
         if (!OperatingSystem.IsWindows()) return;
         byte flag = sparse ? (byte)1 : (byte)0;
         DeviceIoControl(file, FsctlSetSparse, ref flag, 1, IntPtr.Zero, 0, out _, IntPtr.Zero);
+    }
+
+    /// <summary>
+    /// Whether the first <paramref name="length"/> bytes of a file may have parts that were never written: only a
+    /// sparse file can, where the drive keeps no space for them. True also when the drive can't tell.
+    /// </summary>
+    public static bool HasHoles(SafeFileHandle file, long length)
+    {
+        if (!OperatingSystem.IsWindows() || length <= 0 || (File.GetAttributes(file) & FileAttributes.SparseFile) == 0)
+            return false;
+        long[] query = [0, length], ranges = new long[4]; // (offset, length) pairs: room for two
+        if (!DeviceIoControlRanges(file, FsctlQueryAllocatedRanges, query, 16, ranges, ranges.Length * 8, out int returned, IntPtr.Zero))
+            return true; // more pieces than fit (gaps between them), or no answer
+        return returned != 16 || ranges[0] > 0 || ranges[0] + ranges[1] < length;
+    }
+
+    /// <summary>
+    /// Moves a file to the Recycle Bin, without asking. On a drive without one, or for a file too big for it,
+    /// Windows deletes it instead. True when the file is gone from its place.
+    /// </summary>
+    public static bool Recycle(string path)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            File.Delete(path);
+            return true;
+        }
+        const uint Delete = 3;                                                    // FO_DELETE
+        const ushort Silent = 0x4, NoConfirmation = 0x10, AllowUndo = 0x40, NoErrorUi = 0x400;
+        var operation = new ShFileOperation
+        {
+            Function = Delete,
+            From = Path.GetFullPath(path) + "\0", // the list ends with a second \0, which the marshaller adds
+            Flags = AllowUndo | NoConfirmation | Silent | NoErrorUi,
+        };
+        return SHFileOperation(ref operation) == 0 && operation.Aborted == 0 && !File.Exists(path);
     }
 
     /// <summary>Makes sure what was written to the file is on the disk, not only in the cache.</summary>

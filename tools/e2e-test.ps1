@@ -8,8 +8,9 @@
 #
 # Covers: good and bad links together (different content, different size, dead, one that allows a
 # single connection and answers 403 to more, one that drops connections), pasted input, a Firefox
-# .part file, an unfinished file of another file, a hard kill and resume, a server without range
-# requests, and - when aria2c is given or on the PATH - a download that aria2 started.
+# .part file, several unfinished files put together, one under another name, an unfinished file of
+# another file, a hard kill and resume, a server without range requests, connections the tuner tries
+# and takes back, and - when aria2c is given or on the PATH - a download that aria2 started.
 param(
     [Parameter(Mandatory)] [string] $Exe,
     [string] $Aria2 = (Get-Command aria2c -ErrorAction SilentlyContinue)?.Source
@@ -68,6 +69,7 @@ try {
     New-TestFile other.bin (24MB) 2
     New-TestFile small.bin (2MB) 3
     New-TestFile empty.bin 0 4
+    New-TestFile big.bin (64MB) 5
     $hash = Hash (Join-Path $work test.bin)
 
     Start-Mirror 18001 test.bin '--rate 4000000'
@@ -79,6 +81,7 @@ try {
     Start-Mirror 18007 test.bin '--rate 100000'
     Start-Mirror 18008 empty.bin
     Start-Mirror 18009 empty.bin
+    Start-Mirror 18010 big.bin '--rate 1000000 --total-rate 4000000'
 
     # Good and bad links together; only the good ones may be used.
     $dir = New-Folder mixed
@@ -113,6 +116,46 @@ try {
     $run = Invoke-Mirrordl @('-o', $dir, (Url 18001), (Url 18002), $hash)
     Test-Case 'Firefox .part whose end never reached the disk' {
         $run.Code -eq 0 -and (Hash "$dir\test.bin") -eq $hash -and $run.Output -match 'never reached the disk'
+    } $run
+
+    # Several unfinished files of the same download: MirrorDL's own with the middle third, a numbered Firefox
+    # copy with the beginning, and a numbered copy of another file. The first two are put together, so only
+    # the rest is downloaded, and the Firefox copy is removed at the end; the third is left as it is.
+    function New-Stitch([string] $name) {
+        $dir = New-Folder $name
+        $middle = [byte[]]::new(24MB)
+        [Array]::Copy([IO.File]::ReadAllBytes("$work\test.bin"), 8MB, $middle, 8MB, 8MB)
+        [IO.File]::WriteAllBytes("$dir\test.bin.part", $middle)
+        [IO.File]::WriteAllText("$dir\test.bin.part.mirrordl", "mirrordl 2`nsize $(24MB)`nmissing 0 $(8MB)`nmissing $(16MB) $(24MB)`nend`n")
+        Copy-Start "$work\test.bin" "$dir\test(1).Ab12-xY_.bin.part" (6MB)
+        Copy-Start "$work\other.bin" "$dir\test(2).Q1w2E3r4.bin.part" (5MB)
+        $dir
+    }
+    $dir = New-Stitch stitch
+    $otherBefore = Hash "$dir\test(2).Q1w2E3r4.bin.part"
+    $run = Invoke-Mirrordl @('-o', $dir, (Url 18001), (Url 18002), $hash)
+    Test-Case 'several unfinished files put together' {
+        $run.Code -eq 0 -and (Hash "$dir\test.bin") -eq $hash -and
+        $run.Output -match 'Took 5\.00 MB from test\(1\)\.Ab12-xY_\.bin\.part' -and $run.Output -match 'Downloaded 11\.00 MB' -and
+        $run.Output -match 'test\(2\)\.Q1w2E3r4\.bin\.part is not the same file' -and
+        (Hash "$dir\test(2).Q1w2E3r4.bin.part") -eq $otherBefore -and
+        -not (Test-Path "$dir\test(1).Ab12-xY_.bin.part") -and $run.Output -match 'Removed the other unfinished files'
+    } $run
+
+    # The same, but the result doesn't match the checksum given: nothing may be removed then.
+    $dir = New-Stitch stitchdamaged
+    $run = Invoke-Mirrordl @('-o', $dir, (Url 18001), (Url 18002), (Hash "$work\other.bin"))
+    Test-Case 'keeps the other unfinished files when the result is damaged' {
+        $run.Code -eq 2 -and (Test-Path "$dir\test(1).Ab12-xY_.bin.part") -and $run.Output -match 'are kept'
+    } $run
+
+    # An unfinished file under a name of its own, given by hand: compared by content, saved under the links' name.
+    $dir = New-Folder renamed
+    Copy-Start "$work\test.bin" "$dir\my copy.dat" (9MB)
+    $run = Invoke-Mirrordl @('-o', $dir, "$dir\my copy.dat", (Url 18001), (Url 18002), $hash)
+    Test-Case 'unfinished file with another name' {
+        $run.Code -eq 0 -and (Hash "$dir\test.bin") -eq $hash -and -not (Test-Path "$dir\my copy.dat") -and
+        $run.Output -match 'Found my copy\.dat'
     } $run
 
     # An empty file: nothing to download, still saved and checked.
@@ -159,6 +202,12 @@ try {
     $dir = New-Folder oneconnection
     $run = Invoke-Mirrordl @('-o', $dir, (Url 18005), $hash)
     Test-Case 'server that allows one connection' { $run.Code -eq 0 -and (Hash "$dir\test.bin") -eq $hash } $run
+
+    # A server whose connections share one speed limit: the 4 connections a link starts with already reach
+    # it, so the 4 more that are tried bring nothing and leave again in the middle of their parts.
+    $dir = New-Folder fullserver
+    $run = Invoke-Mirrordl @('-o', $dir, 'http://127.0.0.1:18010/big.bin', (Hash "$work\big.bin"))
+    Test-Case 'connections tried and taken back' { $run.Code -eq 0 -and (Hash "$dir\big.bin") -eq (Hash "$work\big.bin") } $run
 
     # aria2 continued a Firefox file and stopped: its pieces are all over the file.
     if ($Aria2) {

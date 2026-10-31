@@ -42,11 +42,11 @@ static class Ui
 
     public static void ReadInteractive(Job job, List<string> ignored)
     {
-        if (job.PartFile != null)
-            Console.WriteLine($"Continuing: {job.PartFile}");
+        foreach (string part in job.PartFiles)
+            Console.WriteLine($"Continuing: {part}");
         Console.WriteLine("Paste the download links for one file (one per line), then press Enter on an empty line.");
-        Dim("You can also paste a checksum (MD5/SHA-1/SHA-256/SHA-512), drag in an unfinished .part file");
-        Dim("(from mirrordl, Firefox or aria2) to continue it, or drag in a folder to save the file there.");
+        Dim("You can also paste a checksum (MD5/SHA-1/SHA-256/SHA-512), drag in unfinished downloads of the file");
+        Dim("(from mirrordl, Firefox, aria2, any name) to continue them, or drag in a folder to save the file there.");
         Console.WriteLine();
         while (Console.ReadLine() is { } line)
         {
@@ -89,6 +89,8 @@ static class Ui
         }
 
         string total = s.Size is long size ? $"{Format.Bytes(s.Have)} of {Format.Bytes(size)}" : Format.Bytes(s.Have);
+        if (phase == Phase.Copying)
+            return [$"Copying from the other unfinished files  {Bar(s.Percent, 30)} {Format.Percent(s.Percent),6}  {total}"];
         string left = s.SecondsLeft is double seconds ? Format.Duration(seconds) : "--";
         var lines = new List<string>
         {

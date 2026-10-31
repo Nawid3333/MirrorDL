@@ -55,20 +55,20 @@ public sealed partial class MainWindow : Window
 
     async void Start_Click(object sender, RoutedEventArgs e)
     {
-        var job = new Job { Connections = Number(ConnectionsBox, 16), PerServer = Number(PerLinkBox, 8) };
+        var job = new Job();
         var ignored = new List<string>();
         foreach (string line in LinksBox.Text.Split('\r', '\n')) Input.Add(line, job, ignored);
 
-        string part = PartBox.Text.Trim().Trim('"');
-        if (part.Length > 0)
+        foreach (string line in PartBox.Text.Split('\r', '\n'))
         {
-            Input.Add(part, job, []);
-            if (job.PartFile == null)
+            string part = line.Trim().Trim('"');
+            if (part.Length == 0) continue;
+            if (!File.Exists(part))
             {
-                ShowResult(InfoBarSeverity.Warning, "Can't continue that file",
-                    $"{part} isn't an unfinished download: a .part file, or a file with an .aria2 or .mirrordl file next to it.");
+                ShowResult(InfoBarSeverity.Warning, "Can't continue that file", $"{part} doesn't exist.");
                 return;
             }
+            Input.Add(part, job, []);
         }
         string saveTo = SaveToBox.Text.Trim().Trim('"');
         if (saveTo.Length > 0)
@@ -187,6 +187,7 @@ public sealed partial class MainWindow : Window
     {
         Phase.Starting or Phase.Checking => "Checking the links…",
         Phase.Comparing => "Comparing the content of the links…",
+        Phase.Copying => "Copying what the other unfinished files hold…",
         Phase.Downloading => $"Downloading from {Format.Plural(s.Links.Count(l => l.Connections > 0), "link")}",
         Phase.Finishing => "Finishing…",
         Phase.Verifying => "Checking the checksum…",
@@ -276,7 +277,7 @@ public sealed partial class MainWindow : Window
         StartButton.IsEnabled = !running;
         PauseButton.IsEnabled = running;
         LinksBox.IsReadOnly = running;
-        foreach (var control in new Control[] { SaveToBox, PartBox, BrowseFolderButton, BrowsePartButton, ConnectionsBox, PerLinkBox })
+        foreach (var control in new Control[] { SaveToBox, PartBox, BrowseFolderButton, BrowsePartButton })
             control.IsEnabled = !running;
     }
 
@@ -319,7 +320,7 @@ public sealed partial class MainWindow : Window
         var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.Downloads };
         foreach (string type in new[] { ".part", ".aria2", ".mirrordl", "*" }) picker.FileTypeFilter.Add(type);
         WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-        if (await picker.PickSingleFileAsync() is { } file) PartBox.Text = file.Path;
+        foreach (var file in await picker.PickMultipleFilesAsync()) AppendPart(file.Path);
     }
 
     void Root_DragOver(object sender, DragEventArgs e)
@@ -351,7 +352,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>A folder becomes the save folder, a .txt file adds its links, another file is the one to continue.</summary>
+    /// <summary>A folder becomes the save folder, a .txt file adds its links, another file is one to continue.</summary>
     void Use(string text)
     {
         text = text.Trim().Trim('"');
@@ -361,10 +362,18 @@ public sealed partial class MainWindow : Window
         else if (File.Exists(text))
         {
             if (text.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)) AppendLinks(File.ReadAllText(text));
-            else PartBox.Text = text;
+            else AppendPart(text);
         }
         else
             AppendLinks(text);
+    }
+
+    /// <summary>Adds an unfinished file to continue, on a line of its own, unless it is there already.</summary>
+    void AppendPart(string path)
+    {
+        var lines = PartBox.Text.Split('\r', '\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+        if (!lines.Contains(path, StringComparer.OrdinalIgnoreCase)) lines.Add(path);
+        PartBox.Text = string.Join("\r", lines);
     }
 
     void AppendLinks(string text)
@@ -373,9 +382,6 @@ public sealed partial class MainWindow : Window
         if (text.Length == 0) return;
         LinksBox.Text = LinksBox.Text.Trim().Length == 0 ? text : LinksBox.Text.TrimEnd() + "\r" + text;
     }
-
-    static int Number(NumberBox box, int fallback) =>
-        double.IsNaN(box.Value) ? fallback : (int)Math.Clamp(box.Value, 1, 64);
 
     /// <summary>A comfortable size that still fits on the screen, centered.</summary>
     void PlaceWindow()

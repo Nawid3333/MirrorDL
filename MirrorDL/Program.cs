@@ -92,14 +92,25 @@ static class Program
             view = null;
         }
 
-        session.Log += (text, kind) => { lock (gate) Ui.Line(text, kind); };
+        session.Log += (text, kind) =>
+        {
+            lock (gate)
+            {
+                // A message in the middle of a progress block goes below it, and the block starts again under
+                // the message - otherwise the next redraw would write over it.
+                bool live = view != null;
+                EndView();
+                Ui.Line(text, kind);
+                if (live) view = new ProgressView();
+            }
+        };
         session.LinksChecked += () => { lock (gate) Ui.PrintLinks(session.Mirrors); };
         session.PhaseChanged += phase =>
         {
             lock (gate)
             {
                 EndView();
-                if (phase is Phase.Downloading or Phase.Verifying)
+                if (phase is Phase.Copying or Phase.Downloading or Phase.Verifying)
                 {
                     Console.WriteLine();
                     view = new ProgressView();
@@ -147,16 +158,20 @@ static class Program
 
         Usage:
           mirrordl                       asks you to paste the links
-          mirrordl [options] <input>...  inputs: links, a .part file to continue, a .txt file with
-                                         links, a checksum (MD5/SHA-1/SHA-256/SHA-512), a folder
+          mirrordl [options] <input>...  inputs: links, unfinished files to continue (any name), a .txt
+                                         file with links, a checksum (MD5/SHA-1/SHA-256/SHA-512), a folder
 
         Options:
           -o, --out <folder>         save here (default: Downloads, or next to the .part file)
-          -c, --connections <n>      connections in total (default 16)
-          -m, --max-per-server <n>   connections per link (default 8)
+          -c, --connections <n>      at most n connections in total (default: no limit)
+          -m, --max-per-server <n>   at most n connections per link (default: 16)
+
+        mirrordl finds the number of connections by itself: it adds more as long as they make the
+        download faster, and stops where a server or the internet line is the limit.
 
         All links must lead to the same file: mirrordl compares their size and a few pieces of
         content and skips links that differ. It continues unfinished downloads of mirrordl,
-        Firefox (.part) and aria2 (.aria2). Ctrl+C pauses; run it again to continue.
+        Firefox (.part) and aria2 (.aria2); with several of the same file, it checks each one and
+        puts together what they hold. Ctrl+C pauses; run it again to continue.
         """;
 }

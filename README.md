@@ -20,6 +20,9 @@ Windows 10 and 11, as a window app and as a terminal program.
 
 - **All links at once.** Each link gets several connections. Faster links keep taking over work
   from slower ones until the end.
+- **Finds the best number of connections by itself.** It adds connections to a link as long as
+  they make the whole download faster, and stops where the server or your internet line is the
+  limit, at most 16 per link. Nothing to set.
 - **Checks the links first.** Links with a different size are skipped. MirrorDL also compares
   64 KB pieces from several places in the file across all links and skips links whose content
   differs, so you never get a file stitched together from two different versions.
@@ -27,9 +30,12 @@ Windows 10 and 11, as a window app and as a terminal program.
   - Firefox `.part` files, including Firefox's random names (`setup.Ab3-xY_z.exe.part`)
   - aria2 downloads: reads the `.aria2` control file to find the missing pieces
   - its own downloads, even after a crash or a power cut
+  - **several unfinished files of the same download at once**, also under other names: it
+    puts together what they hold and downloads only the rest
 
   Before continuing, it compares what is already on disk with the links. A file that doesn't
-  match is never changed.
+  match is never changed. Continuing reads only the progress file and a few pieces, not the
+  whole file, so even a 50 GB download goes on right away.
 - **Verifies the result** against a checksum (MD5, SHA-1, SHA-256, SHA-384 or SHA-512) if you
   paste one with the links.
 - **Shows the details:** percent, downloaded and remaining size, current and average speed, time
@@ -39,7 +45,13 @@ Windows 10 and 11, as a window app and as a terminal program.
 
 ## Download
 
-From the [latest release](https://github.com/Nawid3333/MirrorDL/releases/latest):
+**The window app from the Microsoft Store**, which installs it and keeps it up to date:
+
+[<img src="https://get.microsoft.com/images/en-us%20dark.svg" width="200" alt="Get it from Microsoft">](https://apps.microsoft.com/detail/9P94PN403J5W?mode=direct)
+
+or in a terminal: `winget install 9P94PN403J5W`
+
+**Or from the [latest release](https://github.com/Nawid3333/MirrorDL/releases/latest):**
 `MirrorDL-win-x64.zip` is the window app, `mirrordl-terminal-win-x64.zip` the terminal program.
 Unzip and start; nothing gets installed.
 
@@ -47,8 +59,9 @@ They need Windows 10 (1809 or newer) or Windows 11, 64-bit, and the
 [.NET 10 Runtime](https://dotnet.microsoft.com/download/dotnet/10.0). The window app brings the
 Windows App SDK along.
 
-**Updates:** the window app tells you when a newer release is out, with a link to it. It asks
-GitHub once at start and sends nothing else ([privacy policy](PRIVACY.md)).
+**Updates:** the Store version gets them from the Store. The window app from the zip tells you
+when a newer release is out, with a link to it. It asks GitHub once at start and sends nothing
+else ([privacy policy](PRIVACY.md)).
 
 ## Use
 
@@ -77,8 +90,8 @@ mirrordl "C:\Users\me\Downloads\file.Ab12-xYz.iso.part" "https://a/file.iso"
 | Option | Meaning |
 |---|---|
 | `-o <folder>` | where to save (default: Downloads, or next to the unfinished file) |
-| `-c <n>` | connections in total (default 16) |
-| `-m <n>` | connections per link (default 8) |
+| `-c <n>` | at most n connections in total (default: no limit) |
+| `-m <n>` | at most n connections per link (default: 16) |
 
 Ctrl+C pauses. Run the same command again to continue.
 
@@ -92,6 +105,29 @@ choose one yourself.
   Firefox or close Firefox first. **Don't cancel it in Firefox: that deletes the `.part` file.**
 - **aria2** writes pieces all over the file, so the file size says nothing about how much is done.
   MirrorDL reads the `.aria2` file to find the missing pieces. Stop aria2 first.
+
+### Several unfinished files of the same download
+
+Browsers download a file from the start to the end, so of two Firefox `.part` files of the same
+download the bigger one already holds everything the smaller one has. aria2 and MirrorDL download
+pieces all over the file, so their unfinished files can hold different parts. MirrorDL uses them all:
+
+1. It finds the unfinished files of the download in the save folder, also numbered copies like
+   `name(1).ext.part`. Files under other names you add yourself (several at once: one per line
+   in **Continue**, or drop them on the window).
+2. It compares each one with the links. A different file is left as it is.
+3. The one holding the most is continued; what the others hold beyond it is copied into it.
+   Copying on the disk is much faster than downloading.
+4. Only the rest is downloaded. Once the finished file checks out, the other files go to the
+   Recycle Bin (where the drive has one), with their progress files.
+
+What "checks out" means: the download finished with the right size, and the file matches the
+checksum you pasted, or, without one, the links at every piece compared before. A file is
+only removed if it was found to be this download, hasn't changed since, and no other program has
+it open. If anything fails, a download stops, is paused or comes out damaged, nothing is removed.
+
+A file from aria2 or MirrorDL needs its progress file (`.aria2` or `.mirrordl`) next to it, since
+only that tells which parts are downloaded. Without it, MirrorDL doesn't use the file.
 
 ## Limitations
 

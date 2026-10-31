@@ -81,24 +81,20 @@
                         <TextBox x:Name="SaveToBox" Grid.Row="1" Grid.Column="1" />
                         <Button x:Name="BrowseFolderButton" Grid.Row="1" Grid.Column="2" Content="Browse…" Click="BrowseFolder_Click" />
 
-                        <TextBlock Grid.Row="2" Text="Continue" VerticalAlignment="Center" />
-                        <TextBox x:Name="PartBox" Grid.Row="2" Grid.Column="1"
-                                 PlaceholderText="Optional: an unfinished download from Firefox (.part), aria2 (.aria2) or MirrorDL. One in the save folder is found by itself." />
-                        <Button x:Name="BrowsePartButton" Grid.Row="2" Grid.Column="2" Content="Browse…" Click="BrowsePart_Click" />
+                        <TextBlock Grid.Row="2" Text="Continue" VerticalAlignment="Top" Margin="0,6,0,0" />
+                        <TextBox x:Name="PartBox" Grid.Row="2" Grid.Column="1" MaxHeight="96"
+                                 AcceptsReturn="True" TextWrapping="NoWrap" IsSpellCheckEnabled="False"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 PlaceholderText="Optional: unfinished downloads of this file, any name, one per line (ones in the save folder are found anyway)" />
+                        <Button x:Name="BrowsePartButton" Grid.Row="2" Grid.Column="2" VerticalAlignment="Top" Content="Browse…" Click="BrowsePart_Click" />
 
                         <Grid Grid.Row="3" Grid.ColumnSpan="3" ColumnSpacing="12" Margin="0,4,0,0">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <NumberBox x:Name="ConnectionsBox" Header="Connections" Value="16" Minimum="1" Maximum="64"
-                                       SpinButtonPlacementMode="Inline" />
-                            <NumberBox x:Name="PerLinkBox" Grid.Column="1" Header="Per link" Value="8" Minimum="1" Maximum="64"
-                                       SpinButtonPlacementMode="Inline" />
-                            <Button x:Name="StartButton" Grid.Column="3" VerticalAlignment="Bottom" MinWidth="130"
+                            <Button x:Name="StartButton" Grid.Column="1" VerticalAlignment="Bottom" MinWidth="130"
                                     AutomationProperties.Name="Start"
                                     Style="{StaticResource AccentButtonStyle}" Click="Start_Click">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
@@ -106,7 +102,7 @@
                                     <TextBlock x:Name="StartText" Text="Start" />
                                 </StackPanel>
                             </Button>
-                            <Button x:Name="PauseButton" Grid.Column="4" VerticalAlignment="Bottom" MinWidth="130" IsEnabled="False"
+                            <Button x:Name="PauseButton" Grid.Column="2" VerticalAlignment="Bottom" MinWidth="130" IsEnabled="False"
                                     AutomationProperties.Name="Pause" Click="Pause_Click">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <FontIcon Glyph="&#xE769;" FontSize="14" />
