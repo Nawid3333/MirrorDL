@@ -8,8 +8,8 @@
 #
 # Covers: good and bad links together (different content, different size, dead, one that allows a
 # single connection and answers 403 to more, one that drops connections), pasted input, a Firefox
-# .part file, several unfinished files put together, one under another name, an unfinished file of
-# another file, a hard kill and resume, a server without range requests, connections the tuner tries
+# .part file, several unfinished files put together, one under another name, a finished file that is
+# only checked, an unfinished file of another file, a hard kill and resume, a server without range requests, connections the tuner tries
 # and takes back, and - when aria2c is given or on the PATH - a download that aria2 started.
 param(
     [Parameter(Mandatory)] [string] $Exe,
@@ -49,6 +49,13 @@ function Start-Mirror([int] $port, [string] $file, [string] $options = '') {
 function Url([int] $port) { "http://127.0.0.1:$port/test.bin" }
 function New-Folder([string] $name) { (New-Item -ItemType Directory (Join-Path $work $name)).FullName }
 function Hash([string] $path) { if (Test-Path $path) { (Get-FileHash $path -Algorithm SHA256).Hash.ToLower() } }
+function New-Finished([string] $name, [string] $from) {
+    $dir = New-Folder $name
+    Copy-Item "$work\$from" "$dir\game.rar"
+    Set-ItemProperty "$dir\game.rar" IsReadOnly $true # opening it for writing would fail the run
+    $dir
+}
+
 
 function Invoke-Mirrordl([string[]] $arguments, [string] $stdin) {
     $output = if ($stdin) { $stdin | & $Exe @arguments 2>&1 | Out-String } else { & $Exe @arguments 2>&1 | Out-String }
@@ -134,12 +141,17 @@ try {
     $dir = New-Stitch stitch
     $otherBefore = Hash "$dir\test(2).Q1w2E3r4.bin.part"
     $run = Invoke-Mirrordl @('-o', $dir, (Url 18001), (Url 18002), $hash)
+    # The Firefox copy is in the Recycle Bin (only said when Windows reports it arrived there) - or, on a machine
+    # whose Recycle Bin can't be sized up (a fresh CI user), kept and said so. Never gone without being in it.
+    $leftover = "$dir\test(1).Ab12-xY_.bin.part"
+    $recycled = $run.Output -match 'Moved the other unfinished files' -and -not (Test-Path $leftover)
+    $kept = $run.Output -match "Kept test\(1\)\.Ab12-xY_\.bin\.part: it doesn't fit in the Recycle Bin" -and (Test-Path $leftover)
+    if ($kept) { Write-Host "NOTE  the leftover was kept: this machine's Recycle Bin can't be sized up" -ForegroundColor Yellow }
     Test-Case 'several unfinished files put together' {
         $run.Code -eq 0 -and (Hash "$dir\test.bin") -eq $hash -and
         $run.Output -match 'Took 5\.00 MB from test\(1\)\.Ab12-xY_\.bin\.part' -and $run.Output -match 'Downloaded 11\.00 MB' -and
         $run.Output -match 'test\(2\)\.Q1w2E3r4\.bin\.part is not the same file' -and
-        (Hash "$dir\test(2).Q1w2E3r4.bin.part") -eq $otherBefore -and
-        -not (Test-Path "$dir\test(1).Ab12-xY_.bin.part") -and $run.Output -match 'Removed the other unfinished files'
+        (Hash "$dir\test(2).Q1w2E3r4.bin.part") -eq $otherBefore -and ($recycled -or $kept)
     } $run
 
     # The same, but the result doesn't match the checksum given: nothing may be removed then.
@@ -149,13 +161,85 @@ try {
         $run.Code -eq 2 -and (Test-Path "$dir\test(1).Ab12-xY_.bin.part") -and $run.Output -match 'are kept'
     } $run
 
-    # An unfinished file under a name of its own, given by hand: compared by content, saved under the links' name.
+    # An unfinished file under a name of its own, given by hand: compared by content, continued, and it keeps its
+    # name and place - as aria2 and wget do - instead of taking the links' name.
     $dir = New-Folder renamed
     Copy-Start "$work\test.bin" "$dir\my copy.dat" (9MB)
     $run = Invoke-Mirrordl @('-o', $dir, "$dir\my copy.dat", (Url 18001), (Url 18002), $hash)
     Test-Case 'unfinished file with another name' {
-        $run.Code -eq 0 -and (Hash "$dir\test.bin") -eq $hash -and -not (Test-Path "$dir\my copy.dat") -and
-        $run.Output -match 'Found my copy\.dat'
+        $run.Code -eq 0 -and (Hash "$dir\my copy.dat") -eq $hash -and -not (Test-Path "$dir\test.bin") -and
+        -not (Test-Path "$dir\my copy.dat.mirrordl") -and $run.Output -match 'Found my copy\.dat'
+    } $run
+
+    # A finished file, given to check it against the links: only read - never written, renamed or moved, also
+    # when a link's only name is a token at the end of its address (as it was on 2026-11-01, when such a check
+    # renamed the user's file to that token). A plain file given with it is never removed either: it may be the
+    # user's own, not an unfinished download.
+    $dir = New-Finished finished test.bin
+    Copy-Start "$work\test.bin" "$dir\copy.dat" (5MB)
+    $before = (Get-Item "$dir\game.rar").LastWriteTimeUtc
+    $run = Invoke-Mirrordl @('-o', $dir, "$dir\game.rar", "$dir\copy.dat", 'http://127.0.0.1:18001/ISYQvAPiMv', (Url 18002), $hash)
+    Test-Case 'a finished file is only checked' {
+        $run.Code -eq 0 -and (Hash "$dir\game.rar") -eq $hash -and (Get-Item "$dir\game.rar").LastWriteTimeUtc -eq $before -and
+        @(Get-ChildItem $dir).Count -eq 2 -and (Test-Path "$dir\copy.dat") -and
+        $run.Output -match 'only checked' -and $run.Output -match 'Kept copy\.dat' -and $run.Output -notmatch 'Downloaded'
+    } $run
+
+    # A finished file that doesn't match the checksum given: said so, and left as it was.
+    $dir = New-Finished finishedwrongsum test.bin
+    $run = Invoke-Mirrordl @('-o', $dir, "$dir\game.rar", (Url 18001), (Url 18002), (Hash "$work\other.bin"))
+    Test-Case 'a finished file that misses the checksum is left as it was' {
+        $run.Code -eq 2 -and (Hash "$dir\game.rar") -eq $hash -and @(Get-ChildItem $dir).Count -eq 1 -and
+        $run.Output -match 'checksum is for another file'
+    } $run
+
+    # The same with a server that can't send parts: checked by the checksum, never downloaded over; without a
+    # checksum only its size can be checked, and that is said.
+    $dir = New-Finished finishednorange test.bin
+    $withSum = Invoke-Mirrordl @('-o', $dir, "$dir\game.rar", (Url 18006), $hash)
+    $sizeOnly = Invoke-Mirrordl @('-o', $dir, "$dir\game.rar", (Url 18006))
+    Test-Case 'a finished file is only checked, also by a server without range requests' {
+        $withSum.Code -eq 0 -and $sizeOnly.Code -eq 0 -and (Hash "$dir\game.rar") -eq $hash -and @(Get-ChildItem $dir).Count -eq 1 -and
+        $withSum.Output -match 'only checked' -and $sizeOnly.Output -match 'nothing to compare its content with'
+    } ([pscustomobject]@{ Code = "$($withSum.Code) / $($sizeOnly.Code)"; Output = $withSum.Output + $sizeOnly.Output })
+
+    # An empty file under the download's name that isn't Firefox's placeholder (no Firefox .part next to it) may
+    # be the user's own: it stays, and the download takes the next free name.
+    $dir = New-Folder emptyname
+    New-Item -ItemType File "$dir\test.bin" | Out-Null
+    $run = Invoke-Mirrordl @('-o', $dir, (Url 18001), (Url 18002), $hash)
+    Test-Case "an empty file of the user's under the same name stays" {
+        $run.Code -eq 0 -and (Get-Item "$dir\test.bin").Length -eq 0 -and (Hash "$dir\test (1).bin") -eq $hash
+    } $run
+
+    # An empty file given to check it against an empty download: only checked, too.
+    $dir = New-Folder finishedempty
+    New-Item -ItemType File "$dir\notes.dat" | Out-Null
+    Set-ItemProperty "$dir\notes.dat" IsReadOnly $true
+    $run = Invoke-Mirrordl @('-o', $dir, "$dir\notes.dat", 'http://127.0.0.1:18008/empty.bin', 'http://127.0.0.1:18009/empty.bin',
+        'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')
+    Test-Case 'an empty finished file is only checked' {
+        $run.Code -eq 0 -and @(Get-ChildItem $dir).Count -eq 1 -and $run.Output -match 'only checked'
+    } $run
+
+    # MirrorDL's own unfinished file that is complete already (stopped just before it was finished): nothing to
+    # download, and unlike a finished file it gets its final name.
+    $dir = New-Folder completepart
+    Copy-Item "$work\test.bin" "$dir\test.bin.part"
+    [IO.File]::WriteAllText("$dir\test.bin.part.mirrordl", "mirrordl 2`nsize $(24MB)`nend`n")
+    $run = Invoke-Mirrordl @('-o', $dir, (Url 18001), (Url 18002), $hash)
+    Test-Case 'a complete unfinished file gets its final name' {
+        $run.Code -eq 0 -and (Hash "$dir\test.bin") -eq $hash -and @(Get-ChildItem $dir).Count -eq 1 -and
+        $run.Output -match 'complete already' -and $run.Output -notmatch 'only checked'
+    } $run
+
+    # A finished file that isn't the file behind the links: said so, and left exactly as it was.
+    $dir = New-Finished finisheddiffers other.bin
+    $otherHash = Hash "$dir\game.rar"
+    $run = Invoke-Mirrordl @('-o', $dir, "$dir\game.rar", (Url 18001), (Url 18002))
+    Test-Case 'a finished file of another file is left as it was' {
+        $run.Code -ne 0 -and (Hash "$dir\game.rar") -eq $otherHash -and @(Get-ChildItem $dir).Count -eq 1 -and
+        $run.Output -match 'not the same file'
     } $run
 
     # An empty file: nothing to download, still saved and checked.

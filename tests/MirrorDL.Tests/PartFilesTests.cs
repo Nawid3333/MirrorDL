@@ -58,7 +58,36 @@ public class PartFinderTests
         using var folder = new TempFolder();
         string part = folder.File("report.Zz9_Qq8w.pdf.part", 10);
         Assert.Equal("report.Zz9_Qq8w.pdf", PartFinder.FinalName(part, []));
-        Assert.Equal("report.pdf", PartFinder.FinalName(part, [], otherwise: "report.pdf"));
+        // A link's name that is none of the file's own names doesn't replace it.
+        Assert.Equal("report.Zz9_Qq8w.pdf", PartFinder.FinalName(part, ["ISYQvAPiMv"]));
+    }
+
+    [Fact]
+    public void FirefoxPlaceholder_only_next_to_a_file_with_Firefox_random_piece()
+    {
+        using var folder = new TempFolder();
+        string placeholder = folder.File("report.pdf");
+        Assert.Equal(placeholder, PartFinder.FirefoxPlaceholder(folder.File("report.Zz9_Qq8w.pdf.part", 10)));
+        // Without the random piece, an empty "data.bin" may be the user's own file.
+        folder.File("data.bin");
+        Assert.Null(PartFinder.FirefoxPlaceholder(folder.File("data.bin.part", 10)));
+        // A file with content is never a placeholder.
+        folder.File("photo.jpg", 5);
+        Assert.Null(PartFinder.FirefoxPlaceholder(folder.File("photo.Ab12Cd34.jpg.part", 10)));
+    }
+
+    [Fact]
+    public void IsUnfinished_only_for_part_files_and_files_with_a_progress_file()
+    {
+        using var folder = new TempFolder();
+        Assert.True(PartFinder.IsUnfinished(folder.File("a.bin.part", 10)));
+        string aria2 = folder.File("b.bin", 10);
+        folder.File("b.bin.aria2", 10);
+        Assert.True(PartFinder.IsUnfinished(aria2));
+        string own = folder.File("c.bin", 10);
+        folder.File("c.bin.mirrordl", 10);
+        Assert.True(PartFinder.IsUnfinished(own));
+        Assert.False(PartFinder.IsUnfinished(folder.File("game.rar", 10))); // a finished file, or one of the user's
     }
 
     [Fact]

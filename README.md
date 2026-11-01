@@ -106,6 +106,14 @@ choose one yourself.
 - **aria2** writes pieces all over the file, so the file size says nothing about how much is done.
   MirrorDL reads the `.aria2` file to find the missing pieces. Stop aria2 first.
 
+A file you choose keeps its name and folder, also when the links give another name. Only a `.part`
+file gets its final name once it is done.
+
+If the file you choose is complete already, MirrorDL only checks it: against the links, and
+against the checksum if you paste one. It doesn't write to it, rename it or move it. That makes
+it a quick way to check a finished download. If the links can't send parts of the file and you
+paste no checksum, only its size can be checked, and MirrorDL says so.
+
 ### Several unfinished files of the same download
 
 Browsers download a file from the start to the end, so of two Firefox `.part` files of the same
@@ -118,13 +126,21 @@ pieces all over the file, so their unfinished files can hold different parts. Mi
 2. It compares each one with the links. A different file is left as it is.
 3. The one holding the most is continued; what the others hold beyond it is copied into it.
    Copying on the disk is much faster than downloading.
-4. Only the rest is downloaded. Once the finished file checks out, the other files go to the
-   Recycle Bin (where the drive has one), with their progress files.
+4. Only the rest is downloaded. Once the finished file checks out, the other unfinished files go
+   to the Recycle Bin, with their progress files.
 
 What "checks out" means: the download finished with the right size, and the file matches the
 checksum you pasted, or, without one, the links at every piece compared before. A file is
 only removed if it was found to be this download, hasn't changed since, and no other program has
 it open. If anything fails, a download stops, is paused or comes out damaged, nothing is removed.
+
+Only unfinished downloads are removed: `.part` files, and files with a `.aria2` or `.mirrordl`
+progress file. Any other file you added stays, since it may be one of your own.
+
+MirrorDL only moves them to the Recycle Bin. Windows deletes a file that doesn't fit in the
+Recycle Bin for good, without asking, so MirrorDL keeps such a file where it is and tells you.
+(Should Windows still delete one for good, MirrorDL says so too.) The Recycle Bin of a drive holds a few percent of it at first. For big
+downloads, make it bigger: right-click it, **Properties**, **Custom size**.
 
 A file from aria2 or MirrorDL needs its progress file (`.aria2` or `.mirrordl`) next to it, since
 only that tells which parts are downloaded. Without it, MirrorDL doesn't use the file.

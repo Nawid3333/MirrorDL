@@ -213,18 +213,38 @@ static class PartFinder
     }
 
     /// <summary>
-    /// The final name for an unfinished file; a link's file name or Firefox's empty placeholder confirms which
-    /// one. Without either, <paramref name="otherwise"/> if given, else the file's own name without ".part".
+    /// The final name for an unfinished file: one of its own names, never a link's name it doesn't have - a link's
+    /// file name or Firefox's empty placeholder confirms which one. Without either, its name without ".part".
     /// </summary>
-    public static string FinalName(string partPath, IReadOnlyCollection<string> serverNames, string? otherwise = null)
+    public static string FinalName(string partPath, IReadOnlyCollection<string> serverNames)
     {
         string dir = Path.GetDirectoryName(partPath)!, fileName = Path.GetFileName(partPath);
         var own = FinalNames(fileName, copies: false).ToList();
         return FinalNames(fileName).FirstOrDefault(n => serverNames.Contains(n, StringComparer.OrdinalIgnoreCase))
             ?? own.FirstOrDefault(n => new FileInfo(Path.Combine(dir, n)) is { Exists: true, Length: 0 })
-            ?? otherwise
             ?? own[^1];
     }
+
+    /// <summary>
+    /// Firefox's empty placeholder next to its unfinished file: an empty file under the name without Firefox's random
+    /// piece. Null when there is none, or when the file has no random piece - then an empty file of that name may
+    /// be one of the user's.
+    /// </summary>
+    public static string? FirefoxPlaceholder(string partPath)
+    {
+        string dir = Path.GetDirectoryName(partPath)!;
+        var names = FinalNames(Path.GetFileName(partPath), copies: false).ToList();
+        return names.SkipLast(1) // the last is the name without ".part" only, with the random piece still in it
+            .Select(n => Path.Combine(dir, n))
+            .FirstOrDefault(p => new FileInfo(p) is { Exists: true, Length: 0 });
+    }
+
+    /// <summary>
+    /// Whether a file is an unfinished download: a ".part" file, or one with a progress file (.aria2 or .mirrordl)
+    /// next to it. Any other file may be finished or the user's own: MirrorDL never renames or removes it.
+    /// </summary>
+    public static bool IsUnfinished(string path) =>
+        path.EndsWith(".part", StringComparison.OrdinalIgnoreCase) || File.Exists(path + ".aria2") || File.Exists(path + ".mirrordl");
 
     /// <summary>Whether an unfinished file has one of the names itself, not only once a browser's copy number is taken off.</summary>
     public static bool HasName(string partPath, IReadOnlyCollection<string> names) =>
