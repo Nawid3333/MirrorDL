@@ -31,9 +31,14 @@ public class ChecksumTests
         File.WriteAllText(path, "abc");
         long lastDone = -1;
 
-        var results = await Checksum.ComputeAsync(path, [Sha256OfAbc, "900150983cd24fb0d6963f7d28e17f72"],
+        // All five algorithms, with the checksums of "abc" from the standards (RFC 1321, FIPS 180).
+        var results = await Checksum.ComputeAsync(path,
+            [Sha256OfAbc, "900150983cd24fb0d6963f7d28e17f72", "a9993e364706816aba3e25717850c26c9cd0d89d",
+             "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7",
+             "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"],
             (done, _) => lastDone = done, TestContext.Current.CancellationToken);
 
+        Assert.Equal(["SHA256", "MD5", "SHA1", "SHA384", "SHA512"], results.Select(r => r.Algorithm));
         Assert.All(results, r => Assert.Equal(r.Expected, r.Actual));
         Assert.Equal(3, lastDone);
     }

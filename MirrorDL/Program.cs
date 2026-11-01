@@ -22,6 +22,13 @@ static class Program
             Ui.Error(e.Message);
             return 1;
         }
+        catch (Exception e)
+        {
+            // A bug: still the exit code scripts know for an error, with what is needed to report it.
+            Console.WriteLine();
+            Ui.Error("Unexpected error: " + e);
+            return 1;
+        }
         finally
         {
             if (pause)
@@ -36,37 +43,14 @@ static class Program
     {
         var job = new Job();
         var ignored = new List<string>();
-        for (int i = 0; i < args.Length; i++)
+        switch (CommandLine.Parse(args, job, ignored))
         {
-            switch (args[i])
-            {
-                case "-h" or "--help" or "/?":
-                    Console.WriteLine(Help.Replace("{version}", AppInfo.Version));
-                    return 0;
-                case "--version":
-                    Console.WriteLine($"mirrordl {AppInfo.Version}");
-                    return 0;
-                case "-o" or "--out":
-                    string folder = Value(args, ref i);
-                    try { job.OutDir = Path.GetFullPath(folder); }
-                    catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
-                    {
-                        throw new UserError($"Can't use \"{folder}\" as the folder to save in: {e.Message}");
-                    }
-                    break;
-                case "-c" or "--connections":
-                    job.Connections = Number(args, ref i);
-                    break;
-                case "-m" or "--max-per-server":
-                    job.PerServer = Number(args, ref i);
-                    break;
-                case "--delete-leftovers":
-                    job.DeleteLeftovers = true;
-                    break;
-                default:
-                    Input.Add(args[i], job, ignored);
-                    break;
-            }
+            case CommandLine.Request.Help:
+                Console.WriteLine(Help.Replace("{version}", AppInfo.Version));
+                return 0;
+            case CommandLine.Request.Version:
+                Console.WriteLine($"mirrordl {AppInfo.Version}");
+                return 0;
         }
 
         if (job.Urls.Count == 0)
@@ -145,29 +129,19 @@ static class Program
         }
     }
 
-    static string Value(string[] args, ref int i) =>
-        ++i < args.Length ? args[i] : throw new UserError($"{args[i - 1]} needs a value.");
-
-    static int Number(string[] args, ref int i)
-    {
-        string option = args[i];
-        return int.TryParse(Value(args, ref i), out int n) && n is >= 1 and <= 64
-            ? n
-            : throw new UserError($"{option} needs a number from 1 to 64.");
-    }
-
     const string Help = """
         mirrordl {version} - download one file from several links at once
 
         Usage:
           mirrordl                       asks you to paste the links
           mirrordl [options] <input>...  inputs: links, unfinished files to continue (any name), a .txt
-                                         file with links, a checksum (MD5/SHA-1/SHA-256/SHA-512), a folder
+                                         file with links, a checksum (MD5/SHA-1/SHA-256/SHA-384/SHA-512),
+                                         a folder
 
         Options:
-          -o, --out <folder>         save here (default: Downloads, or next to the .part file)
-          -c, --connections <n>      at most n connections in total (default: no limit)
-          -m, --max-per-server <n>   at most n connections per link (default: 16)
+          -o, --out <folder>         save here (default: Downloads, or next to the unfinished file given)
+          -c, --connections <n>      at most n connections in total, 1 to 64 (default: no limit)
+          -m, --max-per-server <n>   at most n connections per link, 1 to 64 (default: 16)
           --delete-leftovers         delete leftovers that can't go to the Recycle Bin for good,
                                      without asking (they are asked about otherwise)
 

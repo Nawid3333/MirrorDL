@@ -70,7 +70,7 @@
                                  AcceptsReturn="True" TextWrapping="NoWrap" IsSpellCheckEnabled="False"
                                  FontFamily="Cascadia Mono, Consolas"
                                  ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Auto"
-                                 PlaceholderText="https://…&#x0a;https://…&#x0a;A checksum (MD5, SHA-1, SHA-256, SHA-512) can go here too.">
+                                 PlaceholderText="https://…&#x0a;https://…&#x0a;A checksum (MD5, SHA-1, SHA-256, SHA-384, SHA-512) can go here too.">
                             <TextBox.Header>
                                 <TextBlock Text="Links to the same file, one per line (you can also drop links or files here)"
                                            FontFamily="{ThemeResource ContentControlThemeFontFamily}" />

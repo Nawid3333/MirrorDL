@@ -258,7 +258,9 @@ static class PartFinder
         var found = Directory.EnumerateFiles(dir, "*.part")
             .Where(p => p.EndsWith(".part", StringComparison.OrdinalIgnoreCase) && FinalNames(Path.GetFileName(p)).Any(wanted.Contains))
             .ToList();
-        found.AddRange(wanted.Select(n => Path.Combine(dir, n)).Where(p => File.Exists(p) && File.Exists(p + ".aria2")));
+        // Under the final name: aria2's, and one MirrorDL continued there (it keeps that name).
+        found.AddRange(wanted.Select(n => Path.Combine(dir, n))
+            .Where(p => File.Exists(p) && (File.Exists(p + ".aria2") || File.Exists(p + ".mirrordl"))));
         return found
             .OrderByDescending(p => File.Exists(p + ".mirrordl") || File.Exists(p + ".aria2"))
             .ThenByDescending(p => new FileInfo(p) is { Exists: true } info ? info.Length : 0) // gone meanwhile: last

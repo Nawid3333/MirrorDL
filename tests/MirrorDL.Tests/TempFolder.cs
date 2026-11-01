@@ -16,5 +16,11 @@ sealed class TempFolder : IDisposable
         return path;
     }
 
-    public void Dispose() => Directory.Delete(Path, recursive: true);
+    public void Dispose()
+    {
+        // Some tests make a file read-only, to prove that nothing writes to it.
+        foreach (string file in Directory.EnumerateFiles(Path, "*", SearchOption.AllDirectories))
+            System.IO.File.SetAttributes(file, FileAttributes.Normal);
+        Directory.Delete(Path, recursive: true);
+    }
 }
