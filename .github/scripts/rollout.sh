@@ -20,6 +20,7 @@
 #   rollout.sh ok <tag> <step>             tick a step
 #   rollout.sh fail <tag> <step> <text>    a step failed: why, in a sentence or two
 #   rollout.sh problem <title> <text>      a failure that belongs to no release (there is no version yet)
+#   rollout.sh solved <title> <text>       close that issue again, if it is open
 #   rollout.sh waiting                     the newest release the Store still has to finish, if any
 #
 # Needs GH_TOKEN (contents: write for the release notes, issues: write) and GH_REPO; GITHUB_SERVER_URL
@@ -146,6 +147,14 @@ waiting() {
 '*}"
 }
 
+solved() {
+  local number
+  number=$(find_issue "$1")
+  if [ -n "$number" ] && [ "$(gh issue view "$number" --json state --jq .state)" = OPEN ]; then
+    gh issue close "$number" --comment "✅ $2 $(run_link)" >/dev/null
+  fi
+}
+
 command=${1:-}
 shift || true
 case $command in
@@ -153,6 +162,7 @@ case $command in
   ok) ok "$@" ;;
   fail) fail "$@" ;;
   problem) report "$@" ;;
+  solved) solved "$@" ;;
   waiting) waiting ;;
-  *) echo "usage: rollout.sh start|ok|fail|problem|waiting ..." >&2; exit 2 ;;
+  *) echo "usage: rollout.sh start|ok|fail|problem|solved|waiting ..." >&2; exit 2 ;;
 esac

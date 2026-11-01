@@ -124,6 +124,10 @@ jobs:
     uses: ./.github/workflows/release.yml
     permissions:
       contents: write # the zips onto the release
+      # Not used in this call - release.yml's report job, for releases published by hand, asks for it. But a
+      # caller must grant whatever any job of the called workflow asks for, skipped or not: without this,
+      # every run of this workflow failed to start (startup_failure).
+      issues: write
     with:
       tag: ${{ needs.version.outputs.tag }}
       sha: ${{ github.event.workflow_run.head_sha }}

@@ -1,0 +1,52 @@
+# Notices what the release workflows can't report themselves: an Auto release run that could not even
+# start (startup_failure - an invalid workflow file, or permissions a called workflow asks for and its
+# caller doesn't give). Such a run has no jobs, so its report job never runs, and GitHub doesn't say
+# whether it starts workflow_run triggers either. So every 3 hours this looks at the newest Auto release
+# run: one that failed to start opens the issue "Automatic release failed" (.github/scripts/rollout.sh),
+# or comments on it once; one that ran fine closes that issue again.
+name: Release watch
+
+on:
+  schedule:
+    - cron: '47 */3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: release-watch
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    name: Look at the newest Auto release run
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read  # the runs
+      issues: write  # the issue, if one failed to start
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Report a run that failed to start
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # "running" while it hasn't finished: the first field must never be empty, or read shifts the URL into it.
+          read -r conclusion url < <(gh run list --workflow auto-release.yml --limit 1 --json conclusion,url \
+            --jq '.[0] | "\(if (.conclusion // "") == "" then "running" else .conclusion end) \(.url // "")"')
+          echo "Newest Auto release run: $conclusion $url"
+          title='Automatic release failed'
+          case $conclusion in
+            startup_failure)
+              .github/scripts/rollout.sh problem "$title" "The newest Auto release run could not even start: $url. A workflow file is invalid, or a called workflow asks for permissions its caller doesn't give; the run's page says which. Until it is fixed, nothing gets released." ;;
+            success)
+              .github/scripts/rollout.sh solved "$title" "Auto release runs again: $url" ;;
+          esac
