@@ -236,12 +236,26 @@ public sealed partial class MainWindow : Window
         StartText.Text = "Start";
         switch (code)
         {
+            case 0 when session.SizeOnly:
+                ShowResult(InfoBarSeverity.Warning, "Only the size could be checked",
+                    $"These links can't send parts of the file to compare. Paste its checksum with the links to check it: {session.SavedPath}",
+                    canShow: true);
+                break;
+            case 0 when session.CheckedOnly:
+                ShowResult(InfoBarSeverity.Success, "The file is complete",
+                    $"It was only checked, and stays as it was: {session.SavedPath}", canShow: true);
+                break;
             case 0:
                 ShowResult(InfoBarSeverity.Success, "Download complete", session.SavedPath, canShow: true);
                 break;
+            case 2 when session.CheckedOnly:
+                ShowResult(InfoBarSeverity.Warning, "The file doesn't match",
+                    $"It is damaged, or the checksum or the links are for another version. It was left as it was: {session.SavedPath}",
+                    canShow: true);
+                break;
             case 2:
                 ShowResult(InfoBarSeverity.Warning, "Saved, but the checksum doesn't match",
-                    $"The file is probably damaged: {session.SavedPath}", canShow: true);
+                    $"The file is damaged, or the checksum is for another version: {session.SavedPath}", canShow: true);
                 break;
             case 130 when session.Phase == Phase.Paused:
                 StartText.Text = "Continue";

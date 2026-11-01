@@ -24,4 +24,23 @@ public class NativeTests
             Assert.False(Native.HasHoles(handle, 0));
         }
     }
+
+    [Fact]
+    public void Recycle_keeps_a_file_too_big_for_the_Recycle_Bin_instead_of_deleting_it_for_good()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Only Windows has a Recycle Bin.");
+        using var folder = new TempFolder();
+        Assert.SkipUnless(new DriveInfo(folder.Path).DriveFormat is "NTFS" or "ReFS", "The temp folder's drive has no sparse files.");
+        string huge = Path.Combine(folder.Path, "huge.bin");
+        // Bigger than its whole drive, so bigger than the drive's Recycle Bin too; sparse, so it takes no room.
+        // Windows would delete it for good without a word (tried: 1.8 TB on a 1.7 TB drive).
+        using (var handle = File.OpenHandle(huge, FileMode.Create, FileAccess.ReadWrite))
+        {
+            Native.SetSparse(handle, true);
+            RandomAccess.SetLength(handle, new DriveInfo(folder.Path).TotalSize + (1L << 30));
+        }
+
+        Assert.Equal(Native.Recycled.NoRoom, Native.Recycle(huge));
+        Assert.True(File.Exists(huge));
+    }
 }

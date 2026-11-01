@@ -68,8 +68,8 @@ public sealed class Session
     long _verifyDone, _verifyTotal;
     List<string> _names = [];          // the file names the links give
     string _serverName = "download";   // the name a new download gets
-    /// <summary>The name the links give, if any: without one, an unfinished file keeps its own.</summary>
-    string? LinkName => _serverName == "download" ? null : _serverName;
+    string _saveDir = "";              // where a new download and a finished .part file go
+    bool _checkOnly;                   // the file was complete already: only checked, never changed
     List<string> _found = [];          // unfinished files of this download: the given ones first
     readonly List<Unfinished> _spare = []; // other unfinished files of this download, not needed once it is done
     readonly List<string> _skipped = [];
@@ -109,6 +109,13 @@ public sealed class Session
     public string? ErrorMessage { get; private set; }
     /// <summary>When paused or stopped: what that means for the unfinished file, and what to do next.</summary>
     public string? Note { get; private set; }
+    /// <summary>The file was complete already, so it was only checked; <see cref="SavedPath"/> is where it is, unchanged.</summary>
+    public bool CheckedOnly => _checkOnly;
+    /// <summary>
+    /// Only checked, and only its size could be: the links can't send parts of the file to compare, and no checksum
+    /// was given.
+    /// </summary>
+    public bool SizeOnly => _checkOnly && _pieces == null && _job.Checksums.Count == 0 && Size > 0;
 
     /// <summary>A message for the user. Raised on a background thread.</summary>
     public event Action<string, LogKind>? Log;
@@ -214,11 +221,21 @@ public sealed class Session
         if (Size == 0)
         {
             // An empty file: nothing to download, but it is saved and checked like any other - as a file of its
-            // own, never written over an unfinished file that was found or given.
+            // own, never written over an unfinished file that was found or given. An empty file the user gave is
+            // this file already: it is only checked.
             LinksChecked?.Invoke();
-            Directory.CreateDirectory(Target.FinalDir);
-            Target = Target with { PartPath = FreePath(Path.Combine(Target.FinalDir, _serverName + ".part")), Name = _serverName };
-            File.WriteAllBytes(Target.PartPath, []);
+            if (new FileInfo(Target.PartPath) is { Exists: true, Length: 0 } && !PartFinder.IsUnfinished(Target.PartPath))
+            {
+                _checkOnly = true;
+                Write($"{Target.Name} is complete already: it is only checked, and stays as it is.", LogKind.Ok);
+            }
+            else
+            {
+                Directory.CreateDirectory(_saveDir);
+                Target = NewTarget();
+                Target = Target with { PartPath = FreePath(Target.PartPath) };
+                File.WriteAllBytes(Target.PartPath, []);
+            }
             complete = true;
         }
         else
@@ -246,7 +263,8 @@ public sealed class Session
         SetPhase(Phase.Finishing);
         long received = _mirrors.Sum(m => m.Bytes);
         double seconds = Math.Max(0.001, _watch.Elapsed.TotalSeconds);
-        Write($"Downloaded {Format.Bytes(received)} in {Format.Duration(seconds)} ({Format.Speed(received / seconds)} on average).");
+        if (!_checkOnly)
+            Write($"Downloaded {Format.Bytes(received)} in {Format.Duration(seconds)} ({Format.Speed(received / seconds)} on average).");
         bool ok = await FinishAsync(ct);
         SetPhase(Phase.Finished);
         return ok ? 0 : 2;
@@ -266,13 +284,24 @@ public sealed class Session
         // Files with the download's own name before numbered copies; within them, the most promising first.
         var found = folders.SelectMany(f => PartFinder.Find(f, _names)).OrderByDescending(p => PartFinder.HasName(p, _names));
         _found = given.Concat(found).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        _saveDir = dir;
         // A numbered copy may be another download of the same name: it is only written into once its content
         // matched (see MultiSourceAsync), never by a server that can only send the whole file.
         string? first = _found.FirstOrDefault(p => given.Contains(p, StringComparer.OrdinalIgnoreCase) || PartFinder.HasName(p, _names));
-        return first != null
-            ? new Target(first, PartFinder.FinalName(first, _names, LinkName), dir)
-            : new Target(Path.Combine(dir, _serverName + ".part"), _serverName, dir);
+        return first != null ? TargetFor(first) : NewTarget();
     }
+
+    /// <summary>
+    /// Where an unfinished file ends up: a ".part" file under its final name in the save folder. Any other file -
+    /// aria2's, which has its final name already, or one the user gave - keeps its name and place, as aria2 and
+    /// wget do when they continue a file.
+    /// </summary>
+    Target TargetFor(string path) => path.EndsWith(".part", StringComparison.OrdinalIgnoreCase)
+        ? new Target(path, PartFinder.FinalName(path, _names), _saveDir)
+        : new Target(path, Path.GetFileName(path), Path.GetDirectoryName(path)!);
+
+    /// <summary>A new download: a ".part" file under the links' name in the save folder.</summary>
+    Target NewTarget() => new(Path.Combine(_saveDir, _serverName + ".part"), _serverName, _saveDir);
 
     async Task<bool> MultiSourceAsync(HttpClient http, List<Mirror> group, CancellationToken ct)
     {
@@ -291,9 +320,9 @@ public sealed class Session
         // The file holding the most becomes the download; what the others hold beyond it is copied in.
         var main = files.MaxBy(f => f.Bytes);
         if (main != null && main.FilePath != Target!.PartPath)
-            Target = Target with { PartPath = main.FilePath, Name = PartFinder.FinalName(main.FilePath, _names, LinkName) };
+            Target = TargetFor(main.FilePath);
         else if (main == null && _found.Count > 0)
-            Target = Target! with { PartPath = Path.Combine(Target.FinalDir, _serverName + ".part"), Name = _serverName };
+            Target = NewTarget();
         var target = Target!;
         var others = files.Where(f => f != main).ToList();
         _spare.AddRange(others);
@@ -308,6 +337,15 @@ public sealed class Session
         Write($"Save to:   {target.FinalDir}");
         foreach (string hex in _job.Checksums)
             Write($"Checksum:  {Checksum.Algorithm(hex)!.Value.Name} {hex}");
+        if (missing.Count == 0)
+        {
+            // Nothing to download: like wget's "already fully retrieved". A file that isn't an unfinished download
+            // is the user's finished file - it is only checked, never written, renamed or moved.
+            _checkOnly = !PartFinder.IsUnfinished(target.PartPath);
+            Write(_checkOnly ? $"{target.Name} is complete already: it is only checked, and stays as it is."
+                             : $"{target.Name} is complete already.", LogKind.Ok);
+            return true;
+        }
         int most = Math.Min(_job.Connections ?? int.MaxValue, sources.Count * (_job.PerServer ?? Tuner.MaxPerLink));
         Write($"Using {Format.Plural(sources.Count, "link")}, with more connections as long as that makes it faster " +
               $"(at most {most}).");
@@ -532,8 +570,10 @@ public sealed class Session
         }
 
         // No progress file: a browser (or another program) downloaded the beginning of the file in one piece.
-        // Not so if parts of it were never written - then it's not known which parts are downloaded.
-        long keep = Math.Max(0, length - TailRedo);
+        // Not so if parts of it were never written - then it's not known which parts are downloaded. A file of
+        // full size that isn't a ".part" file is a finished one: all of it is there, and is compared as it is.
+        bool finished = length == size && !PartFinder.IsUnfinished(path);
+        long keep = finished ? length : Math.Max(0, length - TailRedo);
         using (var handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
             if (Native.HasHoles(handle, keep))
             {
@@ -541,7 +581,8 @@ public sealed class Session
                      "Put its progress file next to it, or move it away to download from scratch.");
                 return null;
             }
-        Write($"Found {name}: it holds the first {Format.Bytes(length)} of {Format.Bytes(size)}.");
+        Write(finished ? $"Found {name}: it has the full size ({Format.Bytes(size)})."
+                       : $"Found {name}: it holds the first {Format.Bytes(length)} of {Format.Bytes(size)}.");
         return new Unfinished(path, keep > 0 ? [(0, keep)] : [], true, PartFinder.IsFirefoxPart(path), length, info.LastWriteTimeUtc);
     }
 
@@ -652,7 +693,9 @@ public sealed class Session
             }
             string where = differs == 0 ? "from its first byte" : $"at {Format.Bytes(differs)}";
             Skip(file.FilePath, $"{file.Name} is not the same file as the links (it differs {where}).",
-                 "It is probably another file or version - move or delete it to download from scratch.");
+                 PartFinder.IsUnfinished(file.FilePath)
+                     ? "It is probably another file or version - move or delete it to download from scratch."
+                     : "It is probably another file or version, and stays as it is.");
             return null;
         }
         if (compared == 0)
@@ -738,6 +781,19 @@ public sealed class Session
         var target = Target!;
         long? size = Size;
         LinksChecked?.Invoke();
+        if (File.Exists(target.PartPath) && !PartFinder.IsUnfinished(target.PartPath))
+        {
+            // The user's file is never written over: complete, it is only checked; otherwise the download gets a
+            // file of its own.
+            if (size is long full && new FileInfo(target.PartPath).Length == full)
+            {
+                _checkOnly = true;
+                Write($"{target.Name} is complete already: it is only checked, and stays as it is.", LogKind.Ok);
+                return true;
+            }
+            Write($"{target.Name} stays as it is; the file is downloaded anew.", LogKind.Warn);
+            Target = target = NewTarget();
+        }
         Write($"{m.Url.Authority} can't send parts of the file: downloading over one connection, and an interrupted download can't be continued.", LogKind.Warn);
         if (File.Exists(target.PartPath) && !await ConfirmAsync(
                 $"{Path.GetFileName(target.PartPath)} is already there ({Format.Bytes(new FileInfo(target.PartPath).Length)}), but " +
@@ -793,12 +849,17 @@ public sealed class Session
     async Task<bool> FinishAsync(CancellationToken ct)
     {
         var target = Target!;
-        using (var stream = new FileStream(target.PartPath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read))
-        {
-            Native.SetSparse(stream.SafeFileHandle, false);
-            if (Size is long expected && stream.Length != expected)
-                throw new UserError($"The finished file has {stream.Length} bytes instead of {expected}. Delete {target.PartPath} and try again.");
-        }
+        long length;
+        if (_checkOnly)
+            length = new FileInfo(target.PartPath).Length; // the user's finished file: only read
+        else
+            using (var stream = new FileStream(target.PartPath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read))
+            {
+                Native.SetSparse(stream.SafeFileHandle, false);
+                length = stream.Length;
+            }
+        if (Size is long size && length != size)
+            throw new UserError($"The finished file has {length} bytes instead of {size}. Delete {target.PartPath} and try again.");
 
         bool ok = true;
         string? damage = null; // what the finished file doesn't match
@@ -806,7 +867,7 @@ public sealed class Session
         {
             ok = false;
             damage = "the links";
-            Write($"The finished file does NOT match the links at {Format.Bytes(differs)}!", LogKind.Error);
+            Write($"The file does NOT match the links at {Format.Bytes(differs)}!", LogKind.Error);
         }
         if (_job.Checksums.Count > 0)
         {
@@ -841,12 +902,28 @@ public sealed class Session
         if (!string.Equals(Path.GetFullPath(target.PartPath), Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase))
         {
             Directory.CreateDirectory(target.FinalDir);
+            // The finished file takes the place of Firefox's empty placeholder; any other file there keeps its name.
+            if (PartFinder.FirefoxPlaceholder(target.PartPath) is { } placeholder
+                && string.Equals(Path.GetFullPath(placeholder), Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase))
+            {
+                try { File.Delete(placeholder); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // in use: the file takes the next free name
+            }
             path = FreePath(path);
             File.Move(target.PartPath, path);
         }
         SavedPath = path;
-        if (ok) Write($"Saved: {path}", LogKind.Ok);
-        else Write($"Saved, but it doesn't match {damage}, so the file is probably damaged: {path}", LogKind.Warn);
+        if (SizeOnly)
+            Write($"{target.Name} has the right size, but there was nothing to compare its content with: these links " +
+                  "can't send parts of the file. Paste its checksum together with the links to check it.", LogKind.Warn);
+        else if (ok)
+            Write(_checkOnly ? $"Checked: the file is complete and matches. It stays as it was: {path}" : $"Saved: {path}", LogKind.Ok);
+        else
+        {
+            string why = damage == "the checksum" ? "the checksum is for another file or version" : "the links have another version";
+            Write((_checkOnly ? "The file" : "Saved, but it") + $" doesn't match {damage}: either it is damaged, or {why}. " +
+                  (_checkOnly ? "It stays as it was: " : "") + path, LogKind.Warn);
+        }
         if (_job.Checksums.Count == 0)
             Write("Tip: paste the checksum from the download page together with the links, and the whole file gets checked.", LogKind.Dim);
         return ok;
@@ -872,48 +949,71 @@ public sealed class Session
     }
 
     /// <summary>
-    /// Removes the other unfinished files of this download, with their progress files and Firefox's empty
-    /// placeholders - to the Recycle Bin where the drive has one. Only called once the finished file is complete
-    /// and checked; each of these files was found to be this download, and one that changed since or that
-    /// another program has open is kept.
+    /// Moves the other unfinished files of this download, with their progress files and Firefox's empty
+    /// placeholders, to the Recycle Bin - never deleted for good. Only called once the finished file is complete
+    /// and checked; each of these files was found to be this download, and one that changed since, that another
+    /// program has open, or that isn't an unfinished download at all (the user's own file) is kept.
     /// </summary>
     void CleanUp()
     {
         var removed = new List<string>();
         foreach (var other in _spare)
         {
-            var info = new FileInfo(other.FilePath);
-            if (!info.Exists) continue;
-            string? keep = !other.Matched ? "too little of it could be compared to be sure it is this download"
-                : info.Length != other.Length || info.LastWriteTimeUtc != other.Written ? "it changed since it was checked"
-                : InUse(other.FilePath) ? "another program has it open"
-                : null;
-            if (keep != null)
+            // A leftover that can't be handled must not stop the finished file from getting its name.
+            try
             {
-                Write($"Kept {other.Name}: {keep}.", LogKind.Warn);
-                continue;
+                CleanUp(other, removed);
             }
-            string dir = Path.GetDirectoryName(other.FilePath)!;
-            var placeholders = PartFinder.FinalNames(other.Name, copies: false).Select(n => Path.Combine(dir, n))
-                .Where(p => !p.Equals(other.FilePath, StringComparison.OrdinalIgnoreCase) && new FileInfo(p) is { Exists: true, Length: 0 });
-            // The file itself first: if it can't go, its progress file stays with it - without one, nothing would
-            // tell anymore which parts of it are downloaded.
-            if (!Native.Recycle(other.FilePath))
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
-                Write($"Could not remove {other.Name}; it stays where it is, with its progress file.", LogKind.Warn);
-                continue;
-            }
-            removed.Add(other.Name);
-            foreach (string file in placeholders.Prepend(other.FilePath + ".aria2").Prepend(other.FilePath + ".mirrordl"))
-            {
-                if (!File.Exists(file)) continue;
-                if (Native.Recycle(file)) removed.Add(Path.GetFileName(file));
-                else Write($"Could not remove {Path.GetFileName(file)}; it stays where it is.", LogKind.Warn);
+                Write($"Could not move {other.Name} to the Recycle Bin ({e.Message.TrimEnd('.')}); it stays where it is.", LogKind.Warn);
             }
         }
         if (removed.Count > 0)
-            Write($"Removed the other unfinished files of this download, which aren't needed anymore (to the Recycle Bin, " +
-                  $"where the drive has one): {string.Join(", ", removed)}", LogKind.Info);
+            Write($"Moved the other unfinished files of this download, which aren't needed anymore, to the Recycle Bin: " +
+                  string.Join(", ", removed), LogKind.Info);
+    }
+
+    /// <summary>Moves one leftover and its progress file and placeholders to the Recycle Bin, or says why it stays.</summary>
+    void CleanUp(Unfinished other, List<string> removed)
+    {
+        var info = new FileInfo(other.FilePath);
+        if (!info.Exists) return;
+        string? keep = !PartFinder.IsUnfinished(other.FilePath) ? "it isn't an unfinished download (.part, or with a .aria2 or .mirrordl file), so it may be a file of yours"
+            : !other.Matched ? "too little of it could be compared to be sure it is this download"
+            : info.Length != other.Length || info.LastWriteTimeUtc != other.Written ? "it changed since it was checked"
+            : InUse(other.FilePath) ? "another program has it open"
+            : null;
+        if (keep != null)
+        {
+            Write($"Kept {other.Name}: {keep}.", LogKind.Warn);
+            return;
+        }
+        string? placeholder = PartFinder.FirefoxPlaceholder(other.FilePath);
+        // The file itself first: if it can't go, its progress file stays with it - without one, nothing would
+        // tell anymore which parts of it are downloaded.
+        var result = Native.Recycle(other.FilePath);
+        if (result is Native.Recycled.NoRoom or Native.Recycled.Failed)
+        {
+            Write(result == Native.Recycled.NoRoom
+                ? $"Kept {other.Name}: it doesn't fit in the Recycle Bin (or its drive has none, or it is switched off), " +
+                  "and Windows would delete it for good. Delete it yourself if you don't need it anymore. If it is only too " +
+                  "big, make the Recycle Bin bigger: right-click it, Properties, Custom size."
+                : File.Exists(other.FilePath) ? $"Could not move {other.Name} to the Recycle Bin; it stays where it is, with its progress file."
+                : $"{other.Name} is gone: another program removed it meanwhile.", LogKind.Warn);
+            return;
+        }
+        if (result == Native.Recycled.Deleted)
+            Write($"Windows deleted {other.Name} for good instead of moving it to the Recycle Bin.", LogKind.Warn);
+        else
+            removed.Add(other.Name);
+        foreach (string? file in new[] { other.FilePath + ".mirrordl", other.FilePath + ".aria2", placeholder })
+        {
+            if (file == null || !File.Exists(file)) continue;
+            if (Native.Recycle(file) == Native.Recycled.Yes) removed.Add(Path.GetFileName(file));
+            else Write(File.Exists(file) ? $"Could not move {Path.GetFileName(file)} to the Recycle Bin; it stays where it is."
+                                         : $"{Path.GetFileName(file)} is gone, but not to the Recycle Bin.", LogKind.Warn);
+        }
     }
 
     static bool InUse(string path)
@@ -929,10 +1029,9 @@ public sealed class Session
         }
     }
 
-    /// <summary>The path itself, or "name (1).ext" etc. if it's taken. Firefox's empty placeholder is replaced.</summary>
+    /// <summary>The path itself, or "name (1).ext" etc. if it's taken: a file already there is never replaced.</summary>
     static string FreePath(string path)
     {
-        if (new FileInfo(path) is { Exists: true, Length: 0 }) File.Delete(path);
         string dir = Path.GetDirectoryName(path)!, stem = Path.GetFileNameWithoutExtension(path), ext = Path.GetExtension(path);
         for (int i = 1; File.Exists(path) || Directory.Exists(path); i++)
             path = Path.Combine(dir, $"{stem} ({i}){ext}");
