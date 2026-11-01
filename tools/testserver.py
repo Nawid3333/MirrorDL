@@ -14,12 +14,25 @@ p.add_argument("--max-conns", type=int, default=0, help="answer 503 above this m
 p.add_argument("--limit-status", type=int, default=503, help="status sent above --max-conns")
 p.add_argument("--no-range", action="store_true")
 p.add_argument("--name", help="Content-Disposition file name")
+p.add_argument("--latency", type=float, default=0, help="seconds before each answer, as a far server's round trip")
+p.add_argument("--burst", type=int, default=0, help="bytes each connection sends at full speed before --rate applies")
+p.add_argument("--flaky-503", type=float, default=0, help="chance per request to answer 503, as a briefly overloaded server")
+p.add_argument("--log", help="file to append each answer's status to (one per line), to count them")
+p.add_argument("--pause-every", type=int, default=0, help="bytes a connection sends before each --pause")
+p.add_argument("--pause", type=float, default=0, help="seconds a connection freezes after every --pause-every bytes")
 a = p.parse_args()
 size = os.path.getsize(a.file)
 active = 0
 lock = threading.Lock()
 line_lock = threading.Lock()
 line_free = 0.0  # when the line all connections share is free again (--total-rate)
+log_lock = threading.Lock()
+
+
+def log(status):
+    if a.log:
+        with log_lock, open(a.log, "a") as f:
+            f.write(f"{status}\n")
 
 
 def take_line(count):
@@ -41,13 +54,22 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         global active
+        if a.latency:
+            time.sleep(a.latency)
+        refuse = 0
         with lock:
             if a.max_conns and active >= a.max_conns:
-                self.send_response(a.limit_status)
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-                return
-            active += 1
+                refuse = a.limit_status
+            elif a.flaky_503 and random.random() < a.flaky_503:
+                refuse = 503
+            else:
+                active += 1
+        if refuse:
+            log(refuse)
+            self.send_response(refuse)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         try:
             self.serve()
         except (ConnectionError, BrokenPipeError):
@@ -71,6 +93,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return
+        log(206 if partial else 200)
         self.send_response(206 if partial else 200)
         self.send_header("Content-Length", str(end - start + 1))
         self.send_header("Content-Type", "application/octet-stream")
@@ -94,7 +117,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(chunk)
                 left -= len(chunk)
                 sent += len(chunk)
-                if a.rate:
+                if a.pause_every and sent // a.pause_every != (sent - len(chunk)) // a.pause_every:
+                    time.sleep(a.pause)
+                    if t0 is not None:
+                        t0 += a.pause  # the freeze doesn't count against --rate
+                if a.rate and sent > a.burst:
+                    if a.burst and sent - len(chunk) <= a.burst:
+                        t0 = time.time() - a.burst / a.rate  # the throttle starts now, after the burst
                     ahead = sent / a.rate - (time.time() - t0)
                     if ahead > 0:
                         time.sleep(ahead)
