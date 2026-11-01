@@ -200,6 +200,17 @@ slow, drop connections, limit connections, serve another file or ignore range re
 from them with the real program, and checks every result by its SHA-256. It also moves leftovers to
 the real Recycle Bin. With aria2 installed, it also continues a download that aria2 started.
 
+### Speed
+
+```
+pwsh tools/speed-test.ps1 -Exe MirrorDL/bin/Release/net10.0/win-x64/mirrordl.exe
+```
+
+downloads in scenarios like a host that allows few connections, a link that slows down after a fast
+start or a far server, several times each, and compares the times - all on this PC, without the
+internet line. What was measured, what changed and which ideas didn't help is in
+[docs/speed.md](docs/speed.md). A change meant to make downloads faster is measured with it first.
+
 ### Releases
 
 Releases are automatic. Once CI has passed on a push to `main`, the commit messages since the last

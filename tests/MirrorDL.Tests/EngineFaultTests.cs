@@ -103,6 +103,78 @@ public class EngineFaultTests
     }
 
     [Fact]
+    public async Task A_link_that_is_busy_for_a_moment_keeps_its_connections()
+    {
+        // The first two extra connections are answered "busy" (503), then the server has room again.
+        using var d = new Download();
+        int requests = 0;
+        var link = d.Link(Download.Bytes(6 * MB, 6));
+        link.ChunkDelay = TimeSpan.FromMilliseconds(30); // about 2 MB/s: still running when more connections come
+        d.OnPhase = phase =>
+        {
+            if (phase != Phase.Downloading) return;
+            link.Answer = (_, _) => Interlocked.Increment(ref requests) is 2 or 3
+                ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+                : null;
+        };
+
+        Assert.Equal(0, await d.RunAsync());
+        Assert.True(requests > 3, "no extra connection was tried");
+        // They waited the moment out instead of leaving: the link may still have as many as it started with.
+        Assert.True(d.Session.Mirrors[0].Cap >= Tuner.StartPerLink, $"the link was cut to {d.Session.Mirrors[0].Cap} connections");
+    }
+
+    [Theory]
+    [InlineData(1)] // the very first question, for the size
+    [InlineData(2)] // a sample of the content
+    public async Task A_link_that_is_busy_while_it_is_checked_is_asked_again_instead_of_left_out(int busy)
+    {
+        using var d = new Download();
+        d.Link(File1);
+        d.Link(File1).Answer = (_, n) => n == busy ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) : null;
+
+        Assert.Equal(0, await d.RunAsync());
+        Assert.Null(d.Session.Mirrors[1].Problem);
+        Assert.True(d.Session.Mirrors[1].Bytes > 0, "the busy link was not used");
+    }
+
+    [Fact]
+    public async Task A_server_that_refuses_samples_at_once_gets_them_one_at_a_time()
+    {
+        using var d = new Download();
+        d.Link(File1);
+        var strict = d.Link(File1);
+        strict.ChunkDelay = TimeSpan.FromMilliseconds(50); // so that samples asked at once overlap
+        strict.MaxConnections = 1;
+        strict.LimitStatus = HttpStatusCode.Forbidden;     // "too many": not a busy moment that passes
+
+        Assert.Equal(0, await d.RunAsync());
+        Assert.True(strict.Refused >= 1, "the samples weren't asked for at once");
+        Assert.Null(d.Session.Mirrors[1].Problem);
+    }
+
+    [Fact]
+    public async Task A_link_that_slows_to_a_trickle_after_a_fast_start_has_its_rest_taken_over()
+    {
+        // Its average stays high for long after the fast start; its speed of the last seconds shows the trickle.
+        using var d = new Download();
+        byte[] file = Download.Bytes(12 * MB, 5);
+        d.Link(file).ChunkDelay = TimeSpan.FromMilliseconds(10);  // about 6 MB/s
+        var trickle = d.Link(file);
+        trickle.SlowAfter = 2 * MB;                                 // 2 MB fast, then
+        trickle.ChunkDelay = TimeSpan.FromMilliseconds(600);        // about 110 KB/s
+        trickle.MaxConnections = 1;                                 // and one connection only, so that its rest
+        trickle.LimitStatus = HttpStatusCode.Forbidden;             // stays with that one trickling connection
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        Assert.Equal(0, await d.RunAsync());
+        Assert.Equal(file, File.ReadAllBytes(d.PathOf("data.bin")));
+        // Taken over once it has run 4 s, the download is done in about 5 s; judged by its average, the trickle kept
+        // its last 2 MB and took about 20 s for them. 15 s leaves room for a slow, busy machine (a CI runner).
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(15), $"it took {watch.Elapsed.TotalSeconds:0.0} s: the trickling link's rest was not taken over");
+    }
+
+    [Fact]
     public async Task A_part_that_ends_early_without_an_error_is_asked_for_again()
     {
         using var d = new Download();
