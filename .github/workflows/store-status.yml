@@ -88,13 +88,12 @@ jobs:
               "$rollout" fail "$TAG" store-live "The Microsoft Store says $STATUS. $partner shows why; fix it there and submit again, or publish a new release." ;;
             gone)
               "$rollout" fail "$TAG" store-live "The Store's current submission isn't ${TAG#v} anymore (it is at $STATUS): it was replaced or deleted. See $partner." ;;
-            waiting)
+            *)
+              # In certification - or at a word this doesn't know, which a week without progress still catches.
               published=$(gh release view "$TAG" --json publishedAt --jq .publishedAt)
               days=$(( ($(date +%s) - $(date -d "$published" +%s)) / 86400 ))
               echo "Waiting for the Store: $STATUS, $days days after the release."
               if [ "$days" -ge 7 ]; then
                 "$rollout" fail "$TAG" store-live "The Store's submission is still at $STATUS after more than a week; $partner may say why."
               fi ;;
-            *)
-              "$rollout" fail "$TAG" store-live "The Store answered with something this doesn't know: $STATUS." ;;
           esac

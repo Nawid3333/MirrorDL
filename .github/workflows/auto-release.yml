@@ -219,10 +219,13 @@ jobs:
           steps=github
           if [ "$WITH_STORE" = true ]; then steps+=,store-submitted,store-live; fi
           "$rollout" start "$TAG" "$steps"
+          # When the GitHub release fails, the Store step never runs: say so where the failure is reported.
+          also=''
+          if [ "$WITH_STORE" = true ]; then also=' The Microsoft Store submission did not run either; re-running the failed jobs does both.'; fi
           if [ "$BUILD" != success ]; then
-            "$rollout" fail "$TAG" github "Building the release files did not work ($BUILD): the release stays a draft that nobody sees. Fix the cause, then re-run the failed jobs."
+            "$rollout" fail "$TAG" github "Building the release files did not work ($BUILD): the release stays a draft that nobody sees. Fix the cause, then re-run the failed jobs.$also"
           elif [ "$PUBLISH" != success ]; then
-            "$rollout" fail "$TAG" github "Publishing the release or checking its downloads did not work ($PUBLISH)."
+            "$rollout" fail "$TAG" github "Publishing the release or checking its downloads did not work ($PUBLISH).$also"
           else
             "$rollout" ok "$TAG" github
           fi

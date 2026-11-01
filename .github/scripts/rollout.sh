@@ -9,6 +9,9 @@
 #   ✅ Microsoft Store: submitted - 2026-11-01
 #   ⏳ Microsoft Store: in certification (hours to a few days)
 #
+# The Store keeps one submission in the works, so a newer release replaces an older one still waiting
+# there; that one's line then says so (⏭️) and nothing waits for it anymore.
+#
 # A failure turns its line into ❌ and opens the issue "Release vX.Y.Z: a step failed", assigned to
 # the repository's owner (so GitHub tells them), or comments on it; the same failure is said once. Once
 # no line is ❌ anymore - after a re-run, say - the issue closes itself.
@@ -43,12 +46,13 @@ text() {
     store-live:wait) echo 'Microsoft Store: in certification (hours to a few days)' ;;
     store-live:ok) echo "Microsoft Store: certified and live - $today" ;;
     store-live:fail) echo 'Microsoft Store: a problem (see the issue)' ;;
+    store-live:replaced) echo "Microsoft Store: replaced by a newer version before it went live - $today" ;;
     *) echo "unknown step or state: $1 $2" >&2; exit 2 ;;
   esac
 }
 
 icon() {
-  case $1 in wait) echo '⏳' ;; ok) echo '✅' ;; fail) echo '❌' ;; esac
+  case $1 in wait) echo '⏳' ;; ok) echo '✅' ;; fail) echo '❌' ;; replaced) echo '⏭️' ;; esac
 }
 
 notes() { gh release view "$1" --json body --jq .body; }
@@ -102,7 +106,14 @@ start() {
 ok() {
   local tag=$1 step=$2 number
   set_line "$tag" "$step" ok
-  if [ "$step" = store-submitted ] && [[ $(notes "$tag") == *'<!-- store-live -->'* ]]; then set_line "$tag" store-live wait; fi
+  if [ "$step" = store-submitted ] && [[ $(notes "$tag") == *'<!-- store-live -->'* ]]; then
+    set_line "$tag" store-live wait
+    # The Store keeps one submission in the works: an older one still waiting was replaced by this one.
+    local older
+    for older in $(waiting_all); do
+      if [ "$older" != "$tag" ]; then set_line "$older" store-live replaced; fi
+    done
+  fi
   # Nothing failed anymore: the issue, if there is one, has served its purpose.
   number=$(find_issue "Release $tag: a step failed")
   if [ -n "$number" ] && [[ $(notes "$tag") != *'❌'* ]] && [ "$(gh issue view "$number" --json state --jq .state)" = OPEN ]; then
@@ -115,16 +126,24 @@ fail() {
   report "Release $1: a step failed" "$3"
 }
 
-# The newest of the last releases whose Store submission went through but which isn't live yet.
-waiting() {
+# The last releases whose Store submission went through but which aren't live yet (nor replaced), newest first.
+waiting_all() {
   local tag body
   for tag in $(gh release list --limit 5 --exclude-drafts --json tagName --jq '.[].tagName'); do
     body=$(notes "$tag")
-    if [[ $body == *'✅ Microsoft Store: submitted'* && $body == *'<!-- store-live -->'* && $body != *'✅ Microsoft Store: certified and live'* ]]; then
+    if [[ $body == *'✅ Microsoft Store: submitted'* && $body == *'<!-- store-live -->'* &&
+          $body != *'✅ Microsoft Store: certified and live'* && $body != *'Microsoft Store: replaced'* ]]; then
       echo "$tag"
-      return
     fi
   done
+}
+
+# The newest of them. Without a pipe into head: under pipefail, the loop cut off by it would fail the script.
+waiting() {
+  local tags
+  tags=$(waiting_all)
+  echo "${tags%%$'
+'*}"
 }
 
 command=${1:-}

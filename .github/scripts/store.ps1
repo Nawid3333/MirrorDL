@@ -59,18 +59,20 @@ Connect-Store
 
 if ($Action -eq 'submit') {
     for ($attempt = 1; ; $attempt++) {
+        # Already there, or under way - from an earlier try, or a re-run of this job? A new publish would delete
+        # that submission and start over, so it is left alone.
+        $submission = Get-Submission
+        if ($submission.Ours -and $submission.Status -in $underWay + 'Published') {
+            Write-Host "The submission of $storeVersion is under way already ($($submission.Status))."
+            break
+        }
+        if ($attempt -gt 3) { throw "Submitting $storeVersion failed 3 times; the Store's submission is at $($submission.Status)." }
         # Uploads the package, commits the submission, and waits until Microsoft has taken it on.
         & msstore publish (Resolve-Path $Package).Path -id $ProductId
         if ($LASTEXITCODE -eq 0) { break }
-        # It went wrong on the way - perhaps only after Microsoft had taken it on. Then a new publish would
-        # delete that submission and start over, so look first.
-        $submission = Get-Submission
-        if ($submission.Ours -and $submission.Status -in $underWay + 'Published') {
-            Write-Host "The submission of $storeVersion is under way all the same ($($submission.Status))."
-            break
-        }
-        if ($attempt -eq 3) { throw "Submitting $storeVersion failed 3 times; the Store's submission is at $($submission.Status)." }
-        Write-Host "Submitting failed (the Store's submission is at $($submission.Status)); trying again in $(60 * $attempt) s."
+        # It went wrong on the way - perhaps only after Microsoft had taken it on, which the Store may not show
+        # at once: wait before looking again.
+        Write-Host "Submitting failed; looking again in $(60 * $attempt) s."
         Start-Sleep -Seconds (60 * $attempt)
     }
     $submission = Get-Submission
