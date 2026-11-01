@@ -199,6 +199,12 @@ public static class Native
     }
 
     /// <summary>
+    /// Only for tools/e2e-test.ps1: with MIRRORDL_TEST_NO_RECYCLE_BIN=1, no file fits in any Recycle Bin, to test what
+    /// happens then on any machine. A session says so in its log.
+    /// </summary>
+    public static bool TestingNoRecycleBin => Environment.GetEnvironmentVariable("MIRRORDL_TEST_NO_RECYCLE_BIN") == "1";
+
+    /// <summary>
     /// Moves a file to the Recycle Bin, without asking - and only there. Windows deletes a file that doesn't fit in
     /// the Recycle Bin for good instead, without a word, so such a file is kept (see <see cref="FitsInRecycleBin"/>).
     /// </summary>
@@ -237,6 +243,7 @@ public static class Native
     [SupportedOSPlatform("windows")]
     static bool FitsInRecycleBin(string path)
     {
+        if (TestingNoRecycleBin) return false;
         var buffer = new char[1024];
         if (!GetVolumePathName(path, buffer, buffer.Length)) return false;
         string mountPoint = new string(buffer).TrimEnd('\0');

@@ -94,6 +94,9 @@
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
+                            <CheckBox x:Name="DeleteLeftoversBox" VerticalAlignment="Bottom"
+                                      Content="Delete leftovers that can't go to the Recycle Bin, without asking"
+                                      ToolTipService.ToolTip="When unfinished files are put together, the ones not needed anymore go to the Recycle Bin. Ones that can't go there (too big for it, or their drive has none) can only be deleted for good: ticked, MirrorDL does that without asking; otherwise it asks when the download is done." />
                             <Button x:Name="StartButton" Grid.Column="1" VerticalAlignment="Bottom" MinWidth="130"
                                     AutomationProperties.Name="Start"
                                     Style="{StaticResource AccentButtonStyle}" Click="Start_Click">
