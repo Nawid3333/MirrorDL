@@ -1,0 +1,56 @@
+# Sends a release's notes to the Microsoft Store on their own, without a new package: the changes listed
+# on the release's GitHub page become the Store's "What's new in this version". Every release's own
+# submission (store.yml) carries its notes already; this is for a release that is in the Store and whose
+# notes there are not (yet) right - say, after its notes were edited on GitHub. From the Actions tab, Run
+# workflow; empty means the latest release.
+#
+# Only for the version the Store has, and not while a submission of it is still under way
+# (.github/scripts/store.ps1). Microsoft certifies the change like any submission, which takes from
+# hours to a few days.
+name: Store notes
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'The release, like v1.2.3. Empty: the latest release.'
+        type: string
+        default: ''
+
+concurrency:
+  group: store-notes
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  notes:
+    name: Send the notes to the Store
+    if: vars.STORE_PRODUCT_ID != ''
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      # Microsoft's action: installs the Microsoft Store Developer CLI (msstore).
+      - uses: microsoft/microsoft-store-apppublisher@cc9910a8d59f2eb55cbb83df0a3800cf3b5300e0 # v1.4
+
+      - name: Send the notes
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TENANT_ID: ${{ secrets.AZURE_AD_TENANT_ID }}
+          SELLER_ID: ${{ secrets.SELLER_ID }}
+          CLIENT_ID: ${{ secrets.AZURE_AD_APPLICATION_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.AZURE_AD_APPLICATION_SECRET }}
+          PRODUCT_ID: ${{ vars.STORE_PRODUCT_ID }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          $tag = if ($env:TAG) { $env:TAG.Trim() } else { gh release view --json tagName --jq .tagName }
+          if ($tag -notmatch '^v\d+\.\d+\.\d+$') { throw "'$tag' is not a release tag like v1.2.3." }
+          ./.github/scripts/store.ps1 -Action notes -ProductId $env:PRODUCT_ID -Version $tag.TrimStart('v')

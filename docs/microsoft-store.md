@@ -76,6 +76,27 @@ That's all. From the next release on, the **Auto release** run ends with a **Mic
 that submits the same version, after the GitHub release is out. A Store problem never holds up the
 GitHub release; fix it and re-run that job.
 
+## What's new in this version
+
+The Store shows each version's notes as **What's new in this version**. Every submission brings its
+own: the changes listed on the release's GitHub page (the pull requests' titles, without the type in
+front like `fix:`), and a link to that page. Changes that leave the app as it is (`ci:`, `docs:`,
+`test:`, `build:`, `chore:`, `refactor:`, `style:`) are left out. For v1.3.2 that is:
+
+```
+- Four measured speed changes, one rejected
+
+Details on GitHub: https://github.com/Nawid3333/MirrorDL/releases/tag/v1.3.2
+```
+
+So the titles of the pull requests are what Store users read. If GitHub can't be read at that moment,
+the Store gets only the link, and the release goes out all the same.
+
+To send the notes again without a new package - after a release's notes were edited on GitHub, say:
+**Actions** > **Store notes** > **Run workflow** (empty means the latest release). It works only for the
+version the Store has, once its submission is live, and Microsoft certifies the change like any
+submission.
+
 ## Knowing where a release is
 
 **On the release's page.** Its notes end with a short list that the workflows keep up to date:

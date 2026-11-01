@@ -63,6 +63,9 @@ Paste the links, press Start. MirrorDL is free and open source (GPL-3.0): https:
 First version in the Microsoft Store.
 ```
 
+That was the first submission's. Since then every release fills it in itself, with the changes listed
+on its GitHub page and a link to it ([microsoft-store.md](microsoft-store.md#whats-new-in-this-version)).
+
 **Product features** (one per field)
 
 ```

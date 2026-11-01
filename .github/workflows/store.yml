@@ -4,6 +4,9 @@
 # published by hand - in both cases only when the repository variable STORE_PRODUCT_ID is set, the
 # last step of the setup (docs/microsoft-store.md) and the switch that turns the Store on.
 #
+# The submission also carries the release's notes: the changes listed on its GitHub page become the
+# Store's "What's new in this version" (.github/scripts/store.ps1).
+#
 # A failure here leaves the GitHub release as it is; the caller opens an issue for it
 # (.github/scripts/rollout.sh). Fix the cause (an expired key, a submission edited in Partner Center),
 # then re-run this job. The Store certifies a submission before it goes live, which takes from hours to
@@ -50,10 +53,13 @@ jobs:
       - uses: microsoft/microsoft-store-apppublisher@cc9910a8d59f2eb55cbb83df0a3800cf3b5300e0 # v1.4
 
       # Signing in and submitting are tried again when they fail on the way; a submission only if none
-      # of this version is under way already (.github/scripts/store.ps1).
+      # of this version is under way already (.github/scripts/store.ps1). The token reads the release's
+      # notes.
       - name: Submit the package
         shell: pwsh
         env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           TENANT_ID: ${{ secrets.AZURE_AD_TENANT_ID }}
           SELLER_ID: ${{ secrets.SELLER_ID }}
           CLIENT_ID: ${{ secrets.AZURE_AD_APPLICATION_CLIENT_ID }}
