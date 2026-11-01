@@ -209,6 +209,16 @@ try {
     $run = Invoke-Mirrordl @('-o', $dir, 'http://127.0.0.1:18010/big.bin', (Hash "$work\big.bin"))
     Test-Case 'connections tried and taken back' { $run.Code -eq 0 -and (Hash "$dir\big.bin") -eq (Hash "$work\big.bin") } $run
 
+    # A fast link and a very slow one: at the end, the fast one takes over what the slow one still has
+    # instead of waiting for it (about 19 s without that, 8 s with it; 14 s leaves room for a slow runner).
+    $dir = New-Folder endgame
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    $run = Invoke-Mirrordl @('-o', $dir, (Url 18001), (Url 18007), $hash)
+    $seconds = $watch.Elapsed.TotalSeconds
+    Test-Case "a slow link's last parts are taken over ($([math]::Round($seconds, 1)) s)" {
+        $run.Code -eq 0 -and (Hash "$dir\test.bin") -eq $hash -and $seconds -lt 14
+    } $run
+
     # aria2 continued a Firefox file and stopped: its pieces are all over the file.
     if ($Aria2) {
         $dir = New-Folder aria2

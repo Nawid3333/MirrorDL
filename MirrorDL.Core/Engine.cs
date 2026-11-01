@@ -30,6 +30,7 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
     public static readonly TimeSpan StallTimeout = TimeSpan.FromSeconds(60);
     const int BufferSize = 256 * 1024;
     const long MinSplit = 1 << 20;
+    static readonly TimeSpan EndgameWait = TimeSpan.FromSeconds(5);
 
     enum Next { Retry, Stop, Left }
 
@@ -38,6 +39,7 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
         public long Pos = start;      // everything before Pos is written
         public long Reserved = start; // everything before Reserved is written or being written
         public long End = end;        // shrinks when another connection takes over the second half
+        public readonly long Start = start, Since = Environment.TickCount64; // to tell how fast it goes
     }
 
     readonly object _lock = new();
@@ -123,6 +125,7 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
     {
         var buffer = new byte[BufferSize];
         int failures = 0;
+        double rate = 0; // bytes per second this connection made on its last piece of work
         bool counted = true; // still in m.Workers
         try
         {
@@ -133,7 +136,7 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
                     counted = false;
                     return;
                 }
-                var segment = Take();
+                var segment = Take(rate);
                 if (segment == null)
                 {
                     if (IsComplete) return;
@@ -144,7 +147,12 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
                 bool stay = true;
                 try
                 {
+                    long from, started = Environment.TickCount64;
+                    lock (_lock) from = segment.Pos;
                     stay = await FetchAsync(m, segment, buffer, ct);
+                    long took = Environment.TickCount64 - started, wrote;
+                    lock (_lock) wrote = segment.Pos - from;
+                    if (wrote > 0 && took > 0) rate = wrote * 1000.0 / took;
                 }
                 catch (Exception e)
                 {
@@ -299,29 +307,66 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
         }
     }
 
-    Segment? Take()
+    /// <summary>
+    /// Work for a connection that goes at <paramref name="rate"/> bytes per second: a free range, half of the
+    /// biggest unfinished segment, or - at the very end - the rest of one that lags far behind.
+    /// </summary>
+    Segment? Take(double rate)
     {
         lock (_lock)
         {
             Segment segment;
+            var biggest = _active.MaxBy(s => s.End - s.Reserved);
             if (_free.Count > 0)
             {
                 var (start, end) = _free[0];
                 _free.RemoveAt(0);
                 segment = new Segment(start, end);
             }
-            else
+            else if (biggest != null && biggest.End - biggest.Reserved >= 2 * MinSplit)
             {
                 // Split the unfinished segment with the most bytes left.
-                var biggest = _active.MaxBy(s => s.End - s.Reserved);
-                if (biggest == null || biggest.End - biggest.Reserved < 2 * MinSplit) return null;
                 long middle = biggest.Reserved + (biggest.End - biggest.Reserved) / 2;
                 segment = new Segment(middle, biggest.End);
                 biggest.End = middle;
             }
+            else if (Lagging(rate) is { } slow)
+            {
+                // The end of the download, with nothing left to split: a connection that would still take a while
+                // for what it has left - a slow server, or one that only trickles - hands the rest over. Its bytes
+                // in flight are still its own; it stops at its next read (take < read in FetchAsync).
+                segment = new Segment(slow.Reserved, slow.End);
+                slow.End = slow.Reserved;
+            }
+            else
+                return null;
             _active.Add(segment);
             return segment;
         }
+    }
+
+    /// <summary>
+    /// The segment a connection going at <paramref name="mine"/> would finish far sooner: one that has run
+    /// for a few seconds (so a connection still getting up to speed isn't judged), would still need more than
+    /// <see cref="EndgameWait"/> at the speed it made so far, and goes at under a third of <paramref name="mine"/>.
+    /// The margin keeps two connections from handing a part back and forth, since each hand-over starts a new
+    /// request. Null if there is none, also while the connection's own speed isn't known yet.
+    /// </summary>
+    Segment? Lagging(double mine)
+    {
+        long now = Environment.TickCount64;
+        Segment? pick = null;
+        double longest = EndgameWait.TotalSeconds;
+        foreach (var s in _active)
+        {
+            long left = s.End - s.Reserved;
+            double seconds = (now - s.Since) / 1000.0;
+            if (left <= 0 || seconds < 4) continue;
+            double speed = (s.Pos - s.Start) / seconds;
+            double eta = speed > 0 ? left / speed : double.PositiveInfinity;
+            if (eta > longest && mine > 3 * speed) (pick, longest) = (s, eta);
+        }
+        return pick;
     }
 
     void Release(Segment segment)
