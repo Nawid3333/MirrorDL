@@ -24,7 +24,28 @@ public sealed class Job
     /// otherwise the user is asked once the download is done.
     /// </summary>
     public bool DeleteLeftovers { get; set; }
+    /// <summary>
+    /// Checksums pasted on the line of a file name or a link: they are that file's. <see cref="Batch"/> gives each
+    /// file its own; a <see cref="Session"/> only uses <see cref="Checksums"/>.
+    /// </summary>
+    public List<FileChecksum> FileChecksums { get; } = [];
+    /// <summary>
+    /// <see cref="Checksums"/> were pasted for several files without saying which is whose: the file is to match one
+    /// of them, and if it matches none, none of them is its own.
+    /// </summary>
+    public bool ChecksumsOfSeveral { get; set; }
+    /// <summary>All links are mirrors of one file, as before MirrorDL sorted links into files: <see cref="Batch"/> doesn't sort them.</summary>
+    public bool OneFile { get; set; }
+    /// <summary>A link to a web page is read for links to files on it (see <see cref="PageLinks"/>).</summary>
+    public bool LookIntoPages { get; set; } = true;
+    /// <summary>The name of the file, set by <see cref="Batch"/>; null for the name the links give.</summary>
+    public string? Name { get; set; }
+    /// <summary>The names of the other files being downloaded into the same folder: their unfinished files aren't this one's.</summary>
+    public List<string> OtherNames { get; } = [];
 }
+
+/// <summary>A checksum pasted on the line of a file name or a link.</summary>
+public sealed record FileChecksum(string Hex, string? Name = null, Uri? Link = null);
 
 /// <summary>A problem the user can fix: shown as a plain message, without a stack trace.</summary>
 public sealed class UserError(string message) : Exception(message);
@@ -80,6 +101,7 @@ public sealed class Session
     readonly List<Unfinished> _noRoom = []; // of those, the ones kept because they don't fit in the Recycle Bin
     readonly List<string> _skipped = [];
     string? _refusal; // why an unfinished file with the download's name can't be used, if none can
+    string? _existing; // a finished file under the download's name, from before: only checked if it is this file
     (byte[][] Reference, List<long> Offsets, int Length)? _pieces; // pieces compared before the download
 
     /// <summary>
@@ -102,10 +124,15 @@ public sealed class Session
         public long At { get; } = at;
     }
 
-    public Session(Job job)
+    public Session(Job job) : this(job, job.Urls.Select((url, i) => new Mirror(i + 1, url)).ToList())
+    {
+    }
+
+    /// <summary>A download from these links; ones inspected already (see <see cref="Batch"/>) aren't asked again.</summary>
+    public Session(Job job, IReadOnlyList<Mirror> mirrors)
     {
         _job = job;
-        _mirrors = job.Urls.Select((url, i) => new Mirror(i + 1, url)).ToList();
+        _mirrors = [.. mirrors];
         _meters = _mirrors.ToDictionary(m => m, _ => new SpeedMeter());
     }
 
@@ -124,7 +151,12 @@ public sealed class Session
     /// Only checked, and only its size could be: the links can't send parts of the file to compare, and no checksum
     /// was given.
     /// </summary>
-    public bool SizeOnly => _checkOnly && _pieces == null && _job.Checksums.Count == 0 && Size > 0;
+    public bool SizeOnly => _checkOnly && _pieces == null && Size > 0
+                            && (_job.Checksums.Count == 0 || _job.ChecksumsOfSeveral && ChecksumMatched == null);
+    /// <summary>The checksum the file matched, if any was given and it did.</summary>
+    public string? ChecksumMatched { get; private set; }
+    /// <summary>One file of a <see cref="Batch"/>: the batch says which version this is, once for all its files.</summary>
+    internal bool PartOfBatch { get; init; }
 
     /// <summary>A message for the user. Raised on a background thread.</summary>
     public event Action<string, LogKind>? Log;
@@ -208,11 +240,18 @@ public sealed class Session
     {
         using var http = CreateClient(Handler);
         SetPhase(Phase.Checking);
-        Write($"MirrorDL {AppInfo.Version}", LogKind.Dim); // so a copied log says which version it came from
-        if (Native.TestingNoRecycleBin)
-            Write("Test mode (MIRRORDL_TEST_NO_RECYCLE_BIN): no file is moved to the Recycle Bin.", LogKind.Warn);
-        Write($"Checking {Format.Plural(_mirrors.Count, "link")}...");
-        await Task.WhenAll(_mirrors.Select(m => m.InspectAsync(http, ct)));
+        if (!PartOfBatch)
+        {
+            Write($"MirrorDL {AppInfo.Version}", LogKind.Dim); // so a copied log says which version it came from
+            if (Native.TestingNoRecycleBin)
+                Write("Test mode (MIRRORDL_TEST_NO_RECYCLE_BIN): no file is moved to the Recycle Bin.", LogKind.Warn);
+        }
+        var fresh = _mirrors.Where(m => !m.Inspected).ToList();
+        if (fresh.Count > 0)
+        {
+            Write($"Checking {Format.Plural(fresh.Count, "link")}...");
+            await Mirror.InspectAllAsync(http, fresh, ct);
+        }
         if (!_mirrors.Any(m => m.Usable))
         {
             LinksChecked?.Invoke();
@@ -231,8 +270,8 @@ public sealed class Session
             foreach (var m in group.Where(m => !m.SupportsRanges))
                 m.Problem = "can't send parts of the file, skipped";
 
-        Target = FindTarget(group);
         Size = group[0].Size;
+        Target = FindTarget(group, split);
         bool complete;
         if (Size == 0)
         {
@@ -288,18 +327,35 @@ public sealed class Session
 
     /// <summary>
     /// Finds the unfinished files of this download - the given ones, then those in their folders and the save
-    /// folder - and picks the file to write into for now: the first of them, or a new one.
+    /// folder - and picks the file to write into for now: the first of them, or a new one. With links that can send
+    /// parts of the file, a finished file under its name in the save folder is a candidate too: if it is this file
+    /// (the download was done before), it is only checked, not downloaded again.
     /// </summary>
-    Target FindTarget(List<Mirror> group)
+    Target FindTarget(List<Mirror> group, bool split)
     {
         _names = group.Select(m => m.FileName).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         _serverName = group.FirstOrDefault(m => m.NameFromHeader)?.FileName ?? _names.FirstOrDefault() ?? "download";
+        if (_job.Name != null)
+        {
+            // The name another file of the batch has is that file's, also where the links give it.
+            _serverName = _job.Name;
+            _names = [_job.Name, .. _names.Where(n => !_job.OtherNames.Contains(n, StringComparer.OrdinalIgnoreCase))];
+            _names = _names.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        }
         var given = _job.PartFiles.Select(Path.GetFullPath).ToList();
         string dir = _job.OutDir ?? (given.Count > 0 ? Path.GetDirectoryName(given[0])! : Native.DownloadsFolder());
         var folders = given.Select(p => Path.GetDirectoryName(p)!).Append(dir).Distinct(StringComparer.OrdinalIgnoreCase);
-        // Files with the download's own name before numbered copies; within them, the most promising first.
-        var found = folders.SelectMany(f => PartFinder.Find(f, _names)).OrderByDescending(p => PartFinder.HasName(p, _names));
-        _found = given.Concat(found).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        // Files with the download's own name before numbered copies; within them, the most promising first. Ones
+        // under the name of another file being downloaded are that file's.
+        var found = folders.SelectMany(f => PartFinder.Find(f, _names))
+            .Where(p => !PartFinder.HasName(p, _job.OtherNames))
+            .OrderByDescending(p => PartFinder.HasName(p, _names));
+        string final = Path.Combine(dir, _serverName);
+        _existing = split && Size > 0 && new FileInfo(final) is { Exists: true } info && info.Length == Size
+                    && !PartFinder.IsUnfinished(final) && !given.Contains(final, StringComparer.OrdinalIgnoreCase)
+            ? final
+            : null;
+        _found = given.Concat(_existing != null ? [_existing] : []).Concat(found).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         _saveDir = dir;
         // A numbered copy may be another download of the same name: it is only written into once its content
         // matched (see MultiSourceAsync), never by a server that can only send the whole file.
@@ -629,6 +685,12 @@ public sealed class Session
     /// </summary>
     void Skip(string path, string why, string advice = "")
     {
+        if (path == _existing)
+        {
+            // A file of the user's that only has the download's name: the download gets a name of its own at the end.
+            Write($"{Path.GetFileName(path)} in the save folder is another file or version; it stays as it is, and the file is downloaded anew.", LogKind.Warn);
+            return;
+        }
         if (_job.PartFiles.Any(p => Path.GetFullPath(p).Equals(path, StringComparison.OrdinalIgnoreCase)) || PartFinder.HasName(path, _names))
             _refusal ??= $"{why} {advice}".TrimEnd();
         _skipped.Add(why);
@@ -793,6 +855,9 @@ public sealed class Session
     /// Where to compare: start, a third, two thirds, end, and inside what each unfinished file holds - for a file
     /// without a progress file, all over what it holds, since nothing else tells that it is in one piece.
     /// </summary>
+    /// <summary>Where links of a file of <paramref name="size"/> are compared when there is no unfinished file.</summary>
+    internal static List<long> SampleOffsets(long size, int length) => SampleOffsets(size, length, []);
+
     static List<long> SampleOffsets(long size, int length, List<Unfinished> files)
     {
         var offsets = new SortedSet<long>();
@@ -915,17 +980,34 @@ public sealed class Session
                 Interlocked.Exchange(ref _verifyDone, done);
             }, ct);
             SetPhase(Phase.Finishing);
-            foreach (var (algorithm, expected, actual) in results)
+            if (_job.ChecksumsOfSeveral)
             {
-                if (actual == expected)
-                    Write($"{algorithm} matches: {actual}", LogKind.Ok);
-                else
+                // Pasted for several files: the file is to match one of them. Matching none, it may be damaged, or its
+                // checksum wasn't pasted - which of the two can't be told, so it is said, not called a failure.
+                if (results.FirstOrDefault(r => r.Actual == r.Expected) is { Expected: not null } hit)
                 {
-                    ok = false;
-                    damage ??= "the checksum";
-                    Write($"{algorithm} does NOT match!\n  expected {expected}\n  got      {actual}", LogKind.Error);
+                    ChecksumMatched = hit.Expected;
+                    Write($"{hit.Algorithm} matches: {hit.Actual}", LogKind.Ok);
                 }
+                else
+                    Write($"The file matches none of the {Format.Plural(results.Count, "checksum")} pasted: it is damaged, or its own " +
+                          "checksum wasn't among them.", LogKind.Warn);
             }
+            else
+                foreach (var (algorithm, expected, actual) in results)
+                {
+                    if (actual == expected)
+                    {
+                        ChecksumMatched ??= expected;
+                        Write($"{algorithm} matches: {actual}", LogKind.Ok);
+                    }
+                    else
+                    {
+                        ok = false;
+                        damage ??= "the checksum";
+                        Write($"{algorithm} does NOT match!\n  expected {expected}\n  got      {actual}", LogKind.Error);
+                    }
+                }
         }
         // Before the file gets its name, so that a leftover can't take the name first.
         if (ok) CleanUp();
@@ -961,7 +1043,7 @@ public sealed class Session
                   (_checkOnly ? "It stays as it was: " : "") + path, LogKind.Warn);
         }
         await DeleteLeftoversAsync();
-        if (_job.Checksums.Count == 0)
+        if (_job.Checksums.Count == 0 && !PartOfBatch)
             Write("Tip: paste the checksum from the download page together with the links, and the whole file gets checked.", LogKind.Dim);
         return ok;
     }
@@ -1186,7 +1268,7 @@ public sealed class Session
 
     void Write(string text, LogKind kind = LogKind.Info) => Log?.Invoke(text, kind);
 
-    static HttpClient CreateClient(HttpMessageHandler? handler)
+    internal static HttpClient CreateClient(HttpMessageHandler? handler)
     {
         bool own = handler == null; // a test's handler stays the test's
         handler ??= new SocketsHttpHandler

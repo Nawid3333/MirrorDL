@@ -42,6 +42,19 @@ public class ChecksumTests
         Assert.All(results, r => Assert.Equal(r.Expected, r.Actual));
         Assert.Equal(3, lastDone);
     }
+
+    [Fact]
+    public async Task ComputeAsync_compares_several_checksums_of_one_algorithm_with_the_same_result()
+    {
+        using var folder = new TempFolder();
+        string path = Path.Combine(folder.Path, "abc.txt");
+        File.WriteAllText(path, "abc");
+        string other = new('0', 64);
+
+        var results = await Checksum.ComputeAsync(path, [other, Sha256OfAbc], (_, _) => { }, TestContext.Current.CancellationToken);
+
+        Assert.Equal([(other, Sha256OfAbc), (Sha256OfAbc, Sha256OfAbc)], results.Select(r => (r.Expected, r.Actual)));
+    }
 }
 
 public class InputTests
@@ -59,6 +72,43 @@ public class InputTests
         Assert.Equal(2, job.Urls.Count);
         Assert.Single(job.Checksums);
         Assert.Contains("words", ignored);
+    }
+
+    [Theory]
+    [InlineData("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  movie.part1.rar")]   // sha256sum
+    [InlineData("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad *movie.part1.rar")]   // sha256sum -b
+    [InlineData("SHA256 (movie.part1.rar) = ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")] // BSD
+    [InlineData("movie.part1.rar: ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")]
+    [InlineData("./files/movie.part1.rar ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")]
+    public void A_checksum_with_a_file_name_on_its_line_is_that_files(string line)
+    {
+        var job = new Job();
+        Input.Add(line, job, []);
+        Assert.Empty(job.Checksums);
+        Assert.Equal([new FileChecksum("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "movie.part1.rar")], job.FileChecksums);
+    }
+
+    [Theory]
+    [InlineData("SHA256: ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")]
+    [InlineData("sha-256 ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")]
+    [InlineData("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")]
+    public void A_checksum_with_only_its_algorithm_belongs_to_no_file_in_particular(string line)
+    {
+        var job = new Job();
+        Input.Add(line, job, []);
+        Assert.Equal(["ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"], job.Checksums);
+        Assert.Empty(job.FileChecksums);
+    }
+
+    [Fact]
+    public void A_checksum_on_the_line_of_a_link_is_that_links_files()
+    {
+        var job = new Job();
+        Input.Add("https://a.example/x.iso sha256:BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD", job, []);
+        Assert.Equal([new Uri("https://a.example/x.iso")], job.Urls);
+        Assert.Empty(job.Checksums);
+        Assert.Equal([new FileChecksum("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", Link: new Uri("https://a.example/x.iso"))],
+            job.FileChecksums);
     }
 
     [Fact]
