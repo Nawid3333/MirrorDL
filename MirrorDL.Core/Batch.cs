@@ -43,6 +43,7 @@ public sealed class BatchFile
         ChecksumMatched = saved.ChecksumMatched;
         CheckedOnly = saved.State == FileState.Checked || saved.CheckedOnly;
         _pageOnly = saved.IsPage;
+        Have = saved.Have;
     }
 
     /// <summary>Its place in the batch, from 1.</summary>
@@ -64,7 +65,11 @@ public sealed class BatchFile
     public string? ChecksumMatched { get; private set; }
     /// <summary>It was there and complete already, so it was only checked.</summary>
     public bool CheckedOnly { get; private set; }
+    /// <summary>How much of it was downloaded when its download last ended (paused, say); null before.</summary>
+    public long? Have { get; private set; }
     public bool IsFinished => State is FileState.Done or FileState.Checked or FileState.Mismatch;
+    /// <summary>The folder it is saved in.</summary>
+    public string Folder => Batch.SaveDir(Job, Job.PartFiles);
     /// <summary>
     /// Its links lead to web pages on which no link to a file could be found - one that needs a captcha or a click, say:
     /// nothing to download until the user opens a page in a browser and takes the link from there.
@@ -98,6 +103,7 @@ public sealed class BatchFile
     internal void End(int code, string? error = null)
     {
         var session = _session!;
+        Have = session.GetStatus().Have; // it ended: no one else reads its numbers now
         SavedPath = session.SavedPath;
         ChecksumMatched = session.ChecksumMatched;
         CheckedOnly = session.CheckedOnly;
@@ -117,7 +123,7 @@ public sealed class BatchFile
     }
 
     internal SavedFile ToSaved() =>
-        new(Number, Name, Size, [.. _numbers], SavedJob.From(Job), State, SavedPath, Message, ChecksumMatched, CheckedOnly, IsPage);
+        new(Number, Name, Size, [.. _numbers], SavedJob.From(Job), State, SavedPath, Message, ChecksumMatched, CheckedOnly, IsPage, Have);
 
     internal static BatchFile FromSaved(SavedFile saved) => new(saved);
 }
@@ -153,7 +159,7 @@ public sealed class Batch
     /// <summary>All that was pasted.</summary>
     public Job Job { get; }
     /// <summary>All links, numbered from 1 as they were pasted.</summary>
-    public IReadOnlyList<Mirror> Mirrors => _mirrors;
+    public IReadOnlyList<Mirror> Mirrors { get { lock (_lock) return [.. _mirrors]; } }
     /// <summary>The files, in the order of their first link; empty until the links are sorted.</summary>
     public IReadOnlyList<BatchFile> Files { get { lock (_lock) return [.. _files]; } }
     public bool IsSorted { get; private set; }
@@ -388,8 +394,11 @@ public sealed class Batch
             Write(null, $"Found on {page.Url.Host}: " + string.Join(", ", files.Select(m => m.FileName)), LogKind.Ok);
             found.AddRange(files);
         }
-        for (int i = 0; i < found.Count; i++) found[i].Index = _mirrors.Count + i + 1;
-        _mirrors.AddRange(found);
+        lock (_lock)
+        {
+            for (int i = 0; i < found.Count; i++) found[i].Index = _mirrors.Count + i + 1;
+            _mirrors.AddRange(found);
+        }
     }
 
     static string PageMessage(BatchFile file) =>
@@ -410,14 +419,23 @@ public sealed class Batch
             var buffer = new byte[64 * 1024];
             int read;
             while (text.Length < Most && (read = await body.ReadAsync(buffer, timeout.Token)) > 0) text.Write(buffer, 0, read);
+            // The encoding: from a byte order mark, the server's answer, or the page's own <meta charset>; else UTF-8.
+            byte[] bytes = text.ToArray();
+            string? charset = response.Content.Headers.ContentType?.CharSet?.Trim('"');
+            if (charset == null)
+            {
+                var meta = System.Text.RegularExpressions.Regex.Match(System.Text.Encoding.ASCII.GetString(bytes, 0, Math.Min(bytes.Length, 4096)),
+                    @"<meta[^>]{0,200}charset\s*=\s*[""']?(?<name>[\w-]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                if (meta.Success) charset = meta.Groups["name"].Value;
+            }
             var encoding = System.Text.Encoding.UTF8;
             try
             {
-                if (response.Content.Headers.ContentType?.CharSet is { Length: > 0 } charset)
-                    encoding = System.Text.Encoding.GetEncoding(charset.Trim('"'));
+                if (charset != null) encoding = System.Text.Encoding.GetEncoding(charset);
             }
             catch (ArgumentException) { } // a name .NET doesn't know: UTF-8 is the best guess
-            return encoding.GetString(text.GetBuffer(), 0, (int)text.Length);
+            using var reader = new StreamReader(new MemoryStream(bytes), encoding, detectEncodingFromByteOrderMarks: true);
+            return await reader.ReadToEndAsync(timeout.Token);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -469,11 +487,16 @@ public sealed class Batch
             var offsets = Session.SampleOffsets(size, length);
             foreach (var m in group.OrderBy(m => m.Index))
             {
-                var gate = gates.GetOrAdd(m.Url.Authority, _ => new SemaphoreSlim(1));
+                var gate = gates.GetOrAdd($"{m.Url.IdnHost}:{m.Url.Port}", _ => new SemaphoreSlim(1));
                 await gate.WaitAsync(ct);
                 try { await m.SampleAsync(http, offsets, length, ct); }
                 finally { gate.Release(); }
-                if (m.Samples == null) continue; // it failed: the next one of the group
+                if (m.Samples == null)
+                {
+                    // A moment of trouble while sorting doesn't cost the link the download: that compares it again.
+                    m.Problem = null;
+                    continue; // the next one of the group
+                }
                 lock (fingerprints) fingerprints.Add((size, group.Key, m.Fingerprint));
                 break;
             }
@@ -545,6 +568,7 @@ public sealed class Batch
                 for (int n = 1; taken.Contains(Path.Combine(dirs[i], name)) || Claims.ContainsKey(Path.Combine(dirs[i], name)); n++)
                     name = Numbered(naturals[i], n);
                 taken.Add(Path.Combine(dirs[i], name));
+                Claims.TryAdd(Path.Combine(dirs[i], name), this);
                 names2.Add(name);
             }
 
@@ -562,6 +586,12 @@ public sealed class Batch
             if (!into.Contains(c.Hex)) into.Add(c.Hex);
         }
         int open = Enumerable.Range(0, groups.Count).Count(i => own[i].Count == 0 && Works(i));
+        // With several files, a checksum that says nothing of its file may be any one's - also when only one file
+        // has none of its own: it is matched, not taken as that file's.
+        bool several = Enumerable.Range(0, groups.Count).Count(Works) > 1;
+        if (loose.Count > 0 && open == 0)
+            foreach (string hex in loose)
+                Write(null, $"The checksum {hex} goes with none of the files - each has a checksum of its own - so it isn't used.", LogKind.Warn);
 
         var files = new List<BatchFile>();
         for (int i = 0; i < groups.Count; i++)
@@ -573,7 +603,7 @@ public sealed class Batch
                 PerServer = Job.PerServer,
                 DeleteLeftovers = Job.DeleteLeftovers,
                 Name = names2[i],
-                ChecksumsOfSeveral = own[i].Count == 0 && open > 1,
+                ChecksumsOfSeveral = own[i].Count == 0 && several,
             };
             job.Urls.AddRange(groups[i].Select(m => m.Url));
             job.PartFiles.AddRange(parts[i]);
@@ -581,8 +611,9 @@ public sealed class Batch
             job.OtherNames.AddRange(Enumerable.Range(0, groups.Count).Where(j => j != i && dirs[j].Equals(dirs[i], StringComparison.OrdinalIgnoreCase))
                 .Select(j => names2[j]));
             lock (Claims)
-                job.OtherNames.AddRange(Claims.Keys.Where(k => Path.GetDirectoryName(k)!.Equals(dirs[i], StringComparison.OrdinalIgnoreCase))
-                    .Select(k => Path.GetFileName(k)));
+                job.OtherNames.AddRange(Claims.Where(c => c.Value != this
+                                                          && Path.GetDirectoryName(c.Key)!.Equals(dirs[i], StringComparison.OrdinalIgnoreCase))
+                    .Select(c => Path.GetFileName(c.Key)));
             files.Add(new BatchFile(i + 1, names2[i], sizes[i], job, groups[i]));
         }
         return files;
@@ -603,7 +634,7 @@ public sealed class Batch
     }
 
     /// <summary>Where a file goes, as <see cref="Session"/> decides it: the save folder, or next to its unfinished file.</summary>
-    static string SaveDir(Job job, IReadOnlyList<string> parts) =>
+    internal static string SaveDir(Job job, IReadOnlyList<string> parts) =>
         Path.GetFullPath(job.OutDir ?? (parts.Count > 0 ? Path.GetDirectoryName(parts[0])! : Native.DownloadsFolder()));
 
     /// <summary>"name (n).ext", as a browser numbers a second download of the same name.</summary>
@@ -642,7 +673,7 @@ public sealed class Batch
 public sealed record SavedBatch(SavedJob Job, List<SavedFile>? Files);
 
 public sealed record SavedFile(int Number, string Name, long? Size, List<int> Links, SavedJob Job, FileState State,
-    string? SavedPath, string? Message, string? ChecksumMatched, bool CheckedOnly = false, bool IsPage = false);
+    string? SavedPath, string? Message, string? ChecksumMatched, bool CheckedOnly = false, bool IsPage = false, long? Have = null);
 
 public sealed record SavedChecksum(string Hex, string? Name, string? Link);
 

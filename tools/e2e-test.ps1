@@ -9,7 +9,8 @@
 # Covers: good and bad links together (different content, different size, dead, one that allows a
 # single connection and answers 403 to more, one that drops connections), pasted input, a Firefox
 # .part file, several unfinished files put together, one under another name, a finished file that is
-# only checked, an unfinished file of another file, a hard kill and resume, a server without range requests, connections the tuner tries
+# only checked, an unfinished file of another file, a hard kill and resume, a server without range requests, links to several
+# files at once with a checksum named for each, connections the tuner tries
 # and takes back, and - when aria2c is given or on the PATH - a download that aria2 started.
 param(
     [Parameter(Mandatory)] [string] $Exe,
@@ -319,6 +320,18 @@ try {
     $seconds = $watch.Elapsed.TotalSeconds
     Test-Case "a slow link's last parts are taken over ($([math]::Round($seconds, 1)) s)" {
         $run.Code -eq 0 -and (Hash "$dir\test.bin") -eq $hash -and $seconds -lt 14
+    } $run
+
+    # Links to two files at once, mixed, each checksum named for its file as in a SHA256SUMS file: two files, each
+    # from its own links and checked against its own checksum.
+    $dir = New-Folder multi
+    $smallHash = Hash (Join-Path $work small.bin)
+    $run = Invoke-Mirrordl @('-o', $dir, (Url 18001), 'http://127.0.0.1:18004/small.bin', (Url 18002),
+        "$hash  test.bin", "$smallHash  small.bin")
+    Test-Case 'links to several files at once' {
+        $run.Code -eq 0 -and (Hash "$dir\test.bin") -eq $hash -and (Hash "$dir\small.bin") -eq $smallHash -and
+        $run.Output -match 'lead to 2 files' -and $run.Output -match '2 files: 2 saved' -and
+        ([regex]::Matches($run.Output, 'SHA256 matches')).Count -eq 2
     } $run
 
     # aria2 continued a Firefox file and stopped: its pieces are all over the file.

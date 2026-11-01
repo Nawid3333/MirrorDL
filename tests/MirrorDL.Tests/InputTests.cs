@@ -92,6 +92,7 @@ public class InputTests
     [InlineData("SHA256: ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")]
     [InlineData("sha-256 ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")]
     [InlineData("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")]
+    [InlineData("Commit: ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")] // words, not a file's name
     public void A_checksum_with_only_its_algorithm_belongs_to_no_file_in_particular(string line)
     {
         var job = new Job();

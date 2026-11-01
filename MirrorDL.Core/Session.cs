@@ -961,7 +961,9 @@ public sealed class Session
                 length = stream.Length;
             }
         if (Size is long size && length != size)
-            throw new UserError($"The finished file has {length} bytes instead of {size}. Delete {target.PartPath} and try again.");
+            throw new UserError(_checkOnly
+                ? $"{target.PartPath} changed while it was checked: it has {length} bytes now instead of {size}. MirrorDL didn't change it."
+                : $"The finished file has {length} bytes instead of {size}. Delete {target.PartPath} and try again.");
 
         bool ok = true;
         string? damage = null; // what the finished file doesn't match

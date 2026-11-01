@@ -32,7 +32,7 @@
     <Application Id="App" Executable="$targetnametoken$.exe" EntryPoint="$targetentrypoint$">
       <uap:VisualElements
         DisplayName="MirrorDL"
-        Description="Download one file from several mirrors at once, after checking that they serve the same file."
+        Description="Download files from several mirrors at once, after checking that they serve the same file."
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png">

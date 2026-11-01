@@ -123,7 +123,7 @@ public sealed class Mirror(int index, Uri url)
 
     /// <summary>Runs <paramref name="action"/> for every link, at most <paramref name="perHost"/> at a time per server.</summary>
     internal static Task PerHostAsync(IEnumerable<Mirror> mirrors, int perHost, Func<Mirror, Task> action) =>
-        Task.WhenAll(mirrors.GroupBy(m => m.Url.Authority, StringComparer.OrdinalIgnoreCase).Select(async host =>
+        Task.WhenAll(mirrors.GroupBy(m => $"{m.Url.IdnHost}:{m.Url.Port}", StringComparer.OrdinalIgnoreCase).Select(async host =>
         {
             using var gate = new SemaphoreSlim(perHost);
             await Task.WhenAll(host.Select(async m =>

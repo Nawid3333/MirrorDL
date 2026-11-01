@@ -62,7 +62,7 @@ public static class Input
     }
 
     /// <summary>A checksum and the name of its file, written on one line; null if the line isn't one.</summary>
-    internal static FileChecksum? NamedChecksum(string line)
+    public static FileChecksum? NamedChecksum(string line)
     {
         var match = Bsd.Match(line);
         if (!match.Success) match = HexFirst.Match(line);
@@ -73,7 +73,9 @@ public static class Input
         if (Checksum.Algorithm(hex) == null || name.Length == 0 || name.Contains("://") || NotNames.Contains(name)
             || Checksum.TryParse(name, out _))
             return null;
-        return new FileChecksum(hex, Mirror.CleanFileName(name));
+        // Only a file's name: "Commit: <hash>" or "Mirror 2 checksum = <hash>" are words before a checksum.
+        name = Mirror.CleanFileName(name);
+        return Batch.IsFileName(name) ? new FileChecksum(hex, name) : null;
     }
 
     static bool AddPath(string path, Job job, List<string> ignored)

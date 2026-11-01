@@ -18,6 +18,7 @@ public sealed class ClickNLoad : IDisposable
 {
     public const int DefaultPort = 9666;
     const int MaxRequest = 4 << 20;
+    const int MaxLinks = 1000; // more from one click is a page flooding the list, not a link site
     static readonly Regex Key = new(@"['""](?<hex>(?:[0-9a-fA-F]{2}){16,32})['""]");
 
     readonly TcpListener _listener;
@@ -87,9 +88,9 @@ public sealed class ClickNLoad : IDisposable
             await stream.WriteAsync(Encoding.ASCII.GetBytes(head), timeout.Token);
             await stream.WriteAsync(content, timeout.Token);
         }
-        catch (Exception e) when (e is IOException or OperationCanceledException or SocketException or FormatException or ObjectDisposedException)
+        catch (Exception)
         {
-            // A broken or slow request: dropped.
+            // A broken, slow or hostile request: dropped. Nothing of it may end the listener or the program.
         }
     }
 
@@ -111,7 +112,7 @@ public sealed class ClickNLoad : IDisposable
             "/flash/addcrypted2" => Decrypt(form.GetValueOrDefault("jk") ?? "", form.GetValueOrDefault("crypted") ?? ""),
             _ => null,
         };
-        if (links is not { Count: > 0 }) return ("200 OK", "text/plain", "failed\r\n");
+        if (links is not { Count: > 0 and <= MaxLinks }) return ("200 OK", "text/plain", "failed\r\n");
         Received?.Invoke(links, string.IsNullOrWhiteSpace(source) ? null : source);
         return ("200 OK", "text/plain", "success\r\n");
     }
@@ -177,7 +178,8 @@ public sealed class ClickNLoad : IDisposable
         long length = 0;
         foreach (string line in lines.Skip(1))
             if (line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase))
-                length = long.Parse(line["Content-Length:".Length..].Trim(), System.Globalization.CultureInfo.InvariantCulture);
+                if (!long.TryParse(line["Content-Length:".Length..].Trim(), System.Globalization.CultureInfo.InvariantCulture, out length))
+                    throw new FormatException("bad Content-Length");
         if (length < 0 || length > MaxRequest) throw new IOException("too big");
         int bodyStart = headerEnd + 4;
         while (buffer.Length - bodyStart < length)

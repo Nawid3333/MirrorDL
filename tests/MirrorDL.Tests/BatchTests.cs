@@ -153,6 +153,37 @@ public class BatchTests
     }
 
     [Fact]
+    public async Task A_checksum_said_for_no_file_is_matched_also_when_only_one_file_has_none_of_its_own()
+    {
+        // A page lists a.bin's SHA-256 with its name and, below it, a.bin's MD5 without: that is no checksum of b.bin.
+        using var d = new Download();
+        d.Link(A, "a.bin");
+        d.Link(B, "b.bin");
+        Input.Add($"{Download.Sha256(A)}  a.bin", d.Job, []);
+        d.Job.Checksums.Add(Convert.ToHexStringLower(System.Security.Cryptography.MD5.HashData(A)));
+
+        Assert.Equal(0, await d.RunBatchAsync());
+        Assert.True(d.Batch.Files[1].Job.ChecksumsOfSeveral);
+        Assert.Equal([FileState.Done, FileState.Done], d.Batch.Files.Select(f => f.State));
+        Assert.Contains("[2] The file matches none of the 1 checksum pasted", d.Output);
+    }
+
+    [Fact]
+    public async Task A_checksum_left_over_when_every_file_has_its_own_is_said_not_dropped()
+    {
+        using var d = new Download();
+        d.Link(A, "a.bin");
+        d.Link(B, "b.bin");
+        Input.Add($"{Download.Sha256(A)}  a.bin", d.Job, []);
+        Input.Add($"{Download.Sha256(B)}  b.bin", d.Job, []);
+        string extra = Download.Sha256(C);
+        d.Job.Checksums.Add(extra);
+
+        Assert.Equal(0, await d.RunBatchAsync());
+        Assert.Contains($"The checksum {extra} goes with none of the files", d.Output);
+    }
+
+    [Fact]
     public async Task One_file_with_a_checksum_not_named_is_checked_against_it_as_before()
     {
         using var d = new Download();
@@ -289,6 +320,7 @@ public class BatchTests
         Assert.Equal(0, d.Batch.Files[0].Links.Sum(m => m.Bytes)); // done before: not even asked again
         Assert.Equal(B, File.ReadAllBytes(d.PathOf("b.bin")));
         Assert.Contains("Found b.bin.part (mirrordl progress)", d.Output);
+        Assert.True(saved.Files![1].Have > 0); // how far it got, for the list after the restart
     }
 
     [Fact]

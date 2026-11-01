@@ -132,4 +132,36 @@ public class PageTests
         Assert.Equal("https://links.example/c/1", from);
         Assert.Null(ClickNLoad.Start(server.Port)); // taken: a second one can't listen there
     }
+
+    [Fact]
+    public async Task ClickNLoad_survives_broken_requests()
+    {
+        using var server = ClickNLoad.Start(0);
+        Assert.NotNull(server);
+        var ct = TestContext.Current.CancellationToken;
+        foreach (string request in new[]
+        {
+            "POST /flash/add HTTP/1.1\r\nContent-Length: 99999999999999999999\r\n\r\n",
+            "POST /flash/add HTTP/1.1\r\nContent-Length: -5\r\n\r\n",
+            "garbage\r\n\r\n",
+        })
+        {
+            using var client = new System.Net.Sockets.TcpClient();
+            await client.ConnectAsync("127.0.0.1", server.Port, ct);
+            await client.GetStream().WriteAsync(Encoding.ASCII.GetBytes(request), ct);
+            var buffer = new byte[256];
+            try { _ = await client.GetStream().ReadAsync(buffer, ct); } catch (IOException) { } // closed without an answer: fine
+        }
+        using var http = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{server.Port}") };
+        Assert.Contains("jdownloader=true", await http.GetStringAsync("/jdcheck.js", ct)); // still listening
+    }
+
+    [Fact]
+    public void A_huge_broken_page_is_read_in_moments()
+    {
+        string html = string.Concat(Enumerable.Repeat("<a <a href='x' ", 300_000)) + new string('"', 100_000);
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        PageLinks.Find(html, Page);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), $"took {watch.Elapsed}");
+    }
 }

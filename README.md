@@ -2,7 +2,7 @@
 
 <h1 align="center">MirrorDL</h1>
 
-<p align="center">Download one file from several mirrors at once, after checking that they all serve the same file.</p>
+<p align="center">Download files from several mirrors at once, after checking that they all serve the same file.</p>
 
 <p align="center">
   <a href="https://github.com/Nawid3333/MirrorDL/actions/workflows/ci.yml"><img src="https://github.com/Nawid3333/MirrorDL/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -11,13 +11,27 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/Nawid3333/MirrorDL" alt="License: GPL-3.0"></a>
 </p>
 
-MirrorDL can also continue unfinished downloads that Firefox or aria2 left behind. It runs on
-Windows 10 and 11, as a window app and as a terminal program.
+Paste the links to one file or to many: MirrorDL sorts them into files, shows you what it found, and
+downloads each file from all of its mirrors at once. It can also continue unfinished downloads that
+Firefox or aria2 left behind. It runs on Windows 10 and 11, as a window app and as a terminal program.
 
 ![MirrorDL downloading the Linux kernel from four mirrors at once; a fifth link to another version is skipped](assets/screenshot-downloading.png)
 
 ## Features
 
+- **Many files, sorted by themselves.** Paste links to several files, also several mirrors of
+  each: links with the same name, or the same size and content, are mirrors of one file; the
+  others are files of their own. Before anything is downloaded, you see the files - name, size,
+  links, what is wrong with a link - and tick what you want.
+- **A download list.** Start new downloads while others run; pause, resume or take off each one,
+  or all at once. The list is kept: after closing MirrorDL or restarting the PC, press Resume.
+- **Links from web pages.** A link to a file host's page is searched for the link behind its
+  download button. A page that needs a captcha opens in MirrorDL's own browser: solve it, click
+  the download button, and MirrorDL takes the link. **Click'n'Load** takes the links from sites
+  like filecrypt, as JDownloader does.
+- **History and settings.** Finished downloads are listed, searchable, with their links. Every
+  extra - the history, keeping the list, Click'n'Load, watching the clipboard, keeping the PC
+  awake, the taskbar progress - is a switch in Settings, with what it does.
 - **All links at once.** Each link gets several connections. Faster links keep taking over work
   from slower ones until the end.
 - **Finds the best number of connections by itself.** It adds connections to a link as long as
@@ -37,7 +51,8 @@ Windows 10 and 11, as a window app and as a terminal program.
   match is never changed. Continuing reads only the progress file and a few pieces, not the
   whole file, so even a 50 GB download goes on right away.
 - **Verifies the result** against a checksum (MD5, SHA-1, SHA-256, SHA-384 or SHA-512) if you
-  paste one with the links.
+  paste one with the links - also several, for several files: with the file's name next to it
+  (as in a `SHA256SUMS` file), or without, and MirrorDL finds which file it belongs to.
 - **Shows the details:** percent, downloaded and remaining size, current and average speed, time
   spent and left, connections, a line per link, and a map of which parts of the file are done.
 - **Copes with real servers:** retries dropped connections, uses fewer connections on servers that
@@ -67,25 +82,49 @@ else ([privacy policy](PRIVACY.md)).
 
 ### Window app
 
-Start `MirrorDL.exe`, paste the links (one per line), and press **Start**.
+Start `MirrorDL.exe`, paste the links, and press **Check links**. MirrorDL shows the files they lead
+to; tick the ones you want and press **Download**.
 
 ![A finished download: the checksum matched and the file was saved](assets/screenshot-done.png)
 
-- Paste a checksum into the same box to have the file checked at the end.
-- Drag links, a folder (where to save) or an unfinished file (to continue it) onto the window.
-- **Pause** saves the progress. Closing the window during a download does the same.
-  Press **Start** again later to continue.
+- Every link, checksum and unfinished file has a box of its own. Paste a whole list into any box,
+  or drop it on the window: each line goes into a box of its own, in the list it belongs to, and
+  next to each box MirrorDL says what it made of it.
+- The files of one check download one after another, each with all of the internet line, so the
+  first ones are done soonest. Check more links while they run: those start next to them.
+- Each download has its buttons: pause, resume, show in folder, take off the list. Click one to
+  see its details below the list: speed, time left, connections, its links, a map of the file,
+  and its messages. **Pause** saves the progress; so does closing the window during a download.
+- A file that is in the save folder already, complete, is only checked, not downloaded again.
+- **History** lists the finished downloads; **Settings** (the gear) has a switch for every extra.
 
-`MirrorDL.exe --start <links…>` fills in the links and starts at once.
+`MirrorDL.exe --start <links…>` fills in the links and starts at once, without showing the files
+first.
+
+### Links from web pages and link sites
+
+Some links lead to a page with a download button rather than to the file. MirrorDL reads the page
+and takes the links to files on it. A page whose link only appears after a captcha or a click
+shows none: **Open page** opens it in MirrorDL's browser. Solve the captcha, click the download
+button, and MirrorDL takes the link and shows the file - the page's own download doesn't happen.
+MirrorDL never solves a captcha for you.
+
+Link sites such as filecrypt have a **Click'n'Load** button. Solve their captcha in your browser
+and press it: the links go to MirrorDL (on 127.0.0.1, port 9666, which only your PC can reach), and
+MirrorDL shows the files - nothing is downloaded before you say so. Only one program can take the
+links at a time: close JDownloader to use it in MirrorDL.
 
 ### Terminal
 
 ```
 mirrordl                                      asks you to paste the links
 mirrordl "https://a/file.iso" "https://b/file.iso" -o D:\Downloads
-mirrordl links.txt
+mirrordl links.txt                            links to one file or many, and checksums
 mirrordl "C:\Users\me\Downloads\file.Ab12-xYz.iso.part" "https://a/file.iso"
 ```
+
+With links to several files, it lists the files it found, downloads them one after another, and
+sums up how each went.
 
 | Option | Meaning |
 |---|---|
@@ -93,8 +132,29 @@ mirrordl "C:\Users\me\Downloads\file.Ab12-xYz.iso.part" "https://a/file.iso"
 | `-c <n>` | at most n connections in total, 1 to 64 (default: no limit) |
 | `-m <n>` | at most n connections per link, 1 to 64 (default: 16) |
 | `--delete-leftovers` | delete leftovers that can't go to the Recycle Bin for good, without asking |
+| `--one-file` | all links are mirrors of one file: don't sort them into files |
+| `--no-pages` | don't look for links to files on pasted web pages |
 
 Ctrl+C pauses. Run the same command again to continue.
+
+## How links are sorted into files
+
+1. MirrorDL asks every link for its file's name and size, at most two at a time per server.
+2. Links with the same file name - from the server, or a file name in the address - are mirrors of
+   one file. Of those, a link with another size or content serves an old or wrong file: it is
+   skipped, as before.
+3. Links with other names but the same size are compared by a few 64 KB pieces of content: the
+   same content means the same file under another name (a mirror that renamed it); other content
+   means another file, as with the parts of a split archive, which all have one size.
+4. A link that doesn't work goes with the file its address names, or shows as a file of its own
+   that can't be downloaded. Two different files of the same name get numbered names
+   (`download`, `download (1)`), also across downloads that run at the same time.
+
+Checksums go with the file named on their line (`<checksum>  name`, or `SHA256 (name) = <checksum>`)
+or the link on their line; with one file, all are that file's. A checksum that says nothing of its
+file is compared with each file at the end: the file that matches it is checked; one that matches
+none of them is said, but not called damaged - the checksum may be another file's. Unfinished
+files you add go with the file of their name, or of the size their progress file tells.
 
 ## Continuing downloads from Firefox and aria2
 

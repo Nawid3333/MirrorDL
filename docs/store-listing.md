@@ -32,7 +32,7 @@ communication app). Then every question is **No**:
 | Shares the user's current location with other users | No |
 | Users can buy digital goods | No |
 | Payouts, gift cards, play-to-earn, crypto rewards, NFTs | No |
-| Is a web browser or a search engine | No: it shows no web pages and searches nothing |
+| Is a web browser or a search engine | No: it is a download manager and searches nothing. It has a small browser window (WebView2) only to open a download page whose link needs a captcha or a click; if the questionnaire asks about unrestricted internet access, that window counts |
 | Mainly a news or education product | No |
 | Uses ratings from a rating board directly, or ships on physical media | No |
 
@@ -45,16 +45,18 @@ Upload `MirrorDL-x64.msix`. Device family: **Windows 10/11 Desktop**.
 **Description**
 
 ```
-MirrorDL downloads one file from several links (mirrors) at the same time, so big downloads finish faster - and it first checks that every link really serves the same file.
+MirrorDL downloads files from several links (mirrors) at the same time, so big downloads finish faster - and it first checks that every link really serves the same file.
 
+- Many files at once: paste the links to several files, also several mirrors of each. MirrorDL sorts them into files by name, size and content, shows you what it found, and downloads what you tick.
+- A download list: start new downloads while others run, pause and resume each one. Paused downloads are still there after closing MirrorDL or restarting the PC.
+- Links from web pages: a file host's page is searched for its download link; a page with a captcha opens in MirrorDL's browser, and MirrorDL takes the link once you click its download button. Click'n'Load takes links from link sites.
 - All mirrors at once: every link gets several connections, and fast mirrors keep taking work over from slow ones until the end.
 - Checks before it combines: links with another size or other content are skipped, so you never get a file stitched together from two versions.
-- Continues unfinished downloads, also those of other programs: Firefox .part files and aria2 downloads, after checking that what is on disk matches the links.
-- Pause any time: the progress is saved, also when you close the window or the computer turns off.
-- Checks the finished file against an MD5, SHA-1, SHA-256 or SHA-512 checksum you paste with the links.
-- Shows everything: percent, speed, time left, the speed of every mirror, and a map of which parts of the file are done.
+- Continues unfinished downloads, also those of other programs: Firefox .part files and aria2 downloads.
+- Checks the finished files against MD5, SHA-1, SHA-256 or SHA-512 checksums you paste with the links.
+- History and settings: finished downloads are listed with their links, and every extra can be switched off.
 
-Paste the links, press Start. MirrorDL is free and open source (GPL-3.0): https://github.com/Nawid3333/MirrorDL
+Paste the links, press Check links, then Download. MirrorDL is free and open source (GPL-3.0): https://github.com/Nawid3333/MirrorDL
 ```
 
 **What's new in this version**
@@ -69,12 +71,13 @@ on its GitHub page and a link to it ([microsoft-store.md](microsoft-store.md#wha
 **Product features** (one per field)
 
 ```
-Downloads one file from several mirrors at once
-Skips links whose size or content differs from the others
+Downloads files from several mirrors at once
+Sorts pasted links into files and shows them before downloading
+Starts new downloads while others run; keeps paused ones after a restart
+Takes download links from web pages and Click'n'Load
 Continues unfinished downloads of Firefox and aria2
-Saves the progress when you pause or close the window
-Checks the result against an MD5, SHA-1, SHA-256 or SHA-512 checksum
-Shows the speed of every mirror and a map of the finished parts
+Checks the results against MD5, SHA-1, SHA-256 or SHA-512 checksums
+History of finished downloads; every extra can be switched off
 ```
 
 **Screenshots** (Desktop), in this order, with these captions
@@ -97,7 +100,7 @@ Trailers, the 16:9 super hero art, the Xbox images, the short title and the voic
 **Short description** (at most 270 characters)
 
 ```
-Download one file from several mirrors at once: faster, and checked first, so every link really serves the same file. Continues unfinished downloads from Firefox and aria2.
+Download files from several mirrors at once: faster, and checked first, so every link really serves the same file. Paste links to many files; MirrorDL sorts them and shows what it found. Continues unfinished downloads from Firefox and aria2.
 ```
 
 **Keywords** (at most 7, 21 words in all)
@@ -133,19 +136,19 @@ The notes for certification are not under Submission options: they are on their 
 Zusätzliche Testinformationen (Additional testing info) in the product's menu.
 
 ```
-MirrorDL is a download manager: it downloads one file from several mirror links at the same time. No account or sign-in is needed; it needs an internet connection.
+MirrorDL is a download manager: it downloads files from several mirror links at the same time. No account or sign-in is needed; it needs an internet connection.
 
 To test:
 1. Start MirrorDL.
-2. Paste these two links (the same Linux kernel source file, 141 MB, on two kernel.org mirrors) into the box:
+2. Paste these two links (the same Linux kernel source file, 141 MB, on two kernel.org mirrors) into the Links box (pasting both at once puts each into a box of its own):
 https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.12.tar.xz
 https://mirrors.edge.kernel.org/pub/linux/kernel/v6.x/linux-6.12.tar.xz
-3. Press Start. The app checks that both links serve the same file, then downloads parts of it from both at once and shows percent, size and speed per mirror.
+3. Press Check links. The app checks that both links serve the same file and shows it (1 file, 2 links). Press Download: it downloads parts of it from both at once and shows percent, size and speed per mirror.
 4. The file is saved in the Downloads folder (another folder can be picked in "Save to").
 
-Resume: press Pause during the download, then Continue; it goes on where it stopped.
+Resume: press the pause button of the download, then the resume button; it goes on where it stopped. History lists finished downloads; Settings (the gear) has a switch for each extra.
 
-runFullTrust: MirrorDL is a WinUI 3 desktop app. It writes downloads to folders the user picks and continues unfinished .part files of Firefox and aria2 in place, so it needs normal file system access.
+runFullTrust: MirrorDL is a WinUI 3 desktop app. It writes downloads to folders the user picks and continues unfinished .part files of Firefox and aria2 in place, so it needs normal file system access. For Click'n'Load it listens on 127.0.0.1 port 9666 (this PC only), and it opens download pages in a WebView2 window.
 
 Source code (GPL-3.0): https://github.com/Nawid3333/MirrorDL
 ```

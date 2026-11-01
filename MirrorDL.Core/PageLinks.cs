@@ -13,15 +13,18 @@ namespace MirrorDL;
 /// </summary>
 public static class PageLinks
 {
-    static readonly Regex Anchor = new(@"<a\b(?<attrs>[^>]*)>(?<text>.*?)</a\s*>", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+    // Every repetition is limited, so that a big or broken page (4 MB of "<a" without ">") can't take minutes.
+    static readonly TimeSpan Budget = TimeSpan.FromSeconds(2);
+    static readonly Regex AnchorStart = new(@"<a\b(?<attrs>[^>]{0,4000})>", RegexOptions.IgnoreCase, Budget);
     static readonly Regex Attribute = new(@"(?<name>[\w-]+)\s*=\s*(?:""(?<value>[^""]*)""|'(?<value>[^']*)'|(?<value>[^\s>""']+))",
-        RegexOptions.IgnoreCase);
+        RegexOptions.IgnoreCase, Budget);
     static readonly Regex LinkAttribute = new(
-        @"\b(?:data-(?:url|href|link|download|file|src))\s*=\s*(?:""(?<value>[^""]*)""|'(?<value>[^']*)')", RegexOptions.IgnoreCase);
-    static readonly Regex Refresh = new(@"<meta[^>]+http-equiv\s*=\s*[""']?refresh[^>]*content\s*=\s*[""'][^""']*url\s*=\s*(?<value>[^""'>]+)",
-        RegexOptions.IgnoreCase);
-    static readonly Regex Quoted = new(@"[""'](?<value>https?:(?:\\?/){2}[^""'\s<>]+)[""']", RegexOptions.IgnoreCase);
-    static readonly Regex Tags = new("<[^>]+>");
+        @"\b(?:data-(?:url|href|link|download|file|src))\s*=\s*(?:""(?<value>[^""]{0,4000})""|'(?<value>[^']{0,4000})')", RegexOptions.IgnoreCase, Budget);
+    static readonly Regex Refresh = new(
+        @"<meta[^>]{0,400}http-equiv\s*=\s*[""']?refresh[^>]{0,400}content\s*=\s*[""'][^""']{0,40}url\s*=\s*(?<value>[^""'>]{1,4000})",
+        RegexOptions.IgnoreCase, Budget);
+    static readonly Regex Quoted = new(@"[""'](?<value>https?:(?:\\?/){2}[^""'\s<>]{1,4000})[""']", RegexOptions.IgnoreCase, Budget);
+    static readonly Regex Tags = new("<[^>]{0,4000}>", RegexOptions.None, Budget);
     static readonly Regex Values = new(@"""[^""]*""|'[^']*'");
     static readonly Regex DownloadAttribute = new(@"(^|\s)download(\s|=|$)", RegexOptions.IgnoreCase);
     static readonly Regex PieceNumber = new(@"\.(?:r\d{2}|\d{3})$", RegexOptions.IgnoreCase);
@@ -55,26 +58,44 @@ public static class PageLinks
                 found[uri] = (total, had.Score > 0 ? had.Order : found.Count);
         }
 
-        foreach (Match a in Anchor.Matches(html))
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        try
         {
+            FindIn(html, Add, watch);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            // A page too big or too broken to read in time: what was found so far.
+        }
+        return [.. found.OrderByDescending(f => f.Value.Score).ThenBy(f => f.Value.Order).Take(most).Select(f => f.Key)];
+    }
+
+    static void FindIn(string html, Action<string?, int> add, System.Diagnostics.Stopwatch watch)
+    {
+        foreach (Match a in AnchorStart.Matches(html))
+        {
+            if (watch.Elapsed > Budget) return;
             var attrs = Attribute.Matches(a.Groups["attrs"].Value)
                 .GroupBy(m => m.Groups["name"].Value.ToLowerInvariant())
                 .ToDictionary(g => g.Key, g => WebUtility.HtmlDecode(g.First().Groups["value"].Value));
-            string text = WebUtility.HtmlDecode(Tags.Replace(a.Groups["text"].Value, " "));
+            // The button's text: up to its end tag, the next link, or 2000 characters.
+            int from = a.Index + a.Length, end = Math.Min(html.Length, from + 2000);
+            int close = html.IndexOf("</a", from, end - from, StringComparison.OrdinalIgnoreCase);
+            int next = html.IndexOf("<a", from, end - from, StringComparison.OrdinalIgnoreCase);
+            int stop = new[] { close, next, end }.Where(i => i >= 0).Min();
+            string text = WebUtility.HtmlDecode(Tags.Replace(html[from..stop], " "));
             // A link marked as a download, or a button that says so, is worth a look even without a file's ending.
             int score = 1;
             if (DownloadAttribute.IsMatch(Values.Replace(a.Groups["attrs"].Value, ""))) score += 3;
             if (Says(text, "download") || Says(attrs.GetValueOrDefault("id"), "download") || Says(attrs.GetValueOrDefault("class"), "download"))
                 score += 2;
-            Add(attrs.GetValueOrDefault("href"), score);
+            add(attrs.GetValueOrDefault("href"), score);
             foreach (var key in attrs.Keys.Where(k => k.StartsWith("data-", StringComparison.Ordinal)))
-                Add(attrs[key], score);
+                add(attrs[key], score);
         }
-        foreach (Match m in LinkAttribute.Matches(html)) Add(WebUtility.HtmlDecode(m.Groups["value"].Value), 1);
-        foreach (Match m in Refresh.Matches(html)) Add(WebUtility.HtmlDecode(m.Groups["value"].Value.Trim()), 3);
-        foreach (Match m in Quoted.Matches(html)) Add(WebUtility.HtmlDecode(m.Groups["value"].Value.Replace("\\/", "/")), 1);
-
-        return [.. found.OrderByDescending(f => f.Value.Score).ThenBy(f => f.Value.Order).Take(most).Select(f => f.Key)];
+        foreach (Match m in LinkAttribute.Matches(html)) add(WebUtility.HtmlDecode(m.Groups["value"].Value), 1);
+        foreach (Match m in Refresh.Matches(html)) add(WebUtility.HtmlDecode(m.Groups["value"].Value.Trim()), 3);
+        foreach (Match m in Quoted.Matches(html)) add(WebUtility.HtmlDecode(m.Groups["value"].Value.Replace("\\/", "/")), 1);
     }
 
     /// <summary>Whether an address ends in the name of a file people download, also a piece of a split archive (".r00", ".001").</summary>
