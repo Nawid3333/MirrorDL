@@ -22,6 +22,7 @@ public class SessionDownloadTests
         Assert.Equal(d.PathOf("data.bin"), d.Session.SavedPath);
         Assert.Equal(Phase.Finished, d.Session.Phase);
         Assert.Equal(Size, d.Session.Mirrors.Sum(m => m.Bytes)); // every byte once
+        Assert.Equal(0, d.Server.Open); // every answer closed
         var status = d.Session.GetStatus();
         Assert.Equal(100, status.Percent);
         Assert.Empty(status.Missing);
@@ -72,6 +73,8 @@ public class SessionDownloadTests
         Assert.Equal(File1, File.ReadAllBytes(d.PathOf("data.bin")));
         Assert.Null(d.Session.Mirrors[0].Problem);
         Assert.Contains("different size (unknown)", d.Session.Mirrors[1].Problem);
+        Assert.Contains("different size (unknown)", d.Session.Mirrors[2].Problem);
+        Assert.Equal(Size, d.Session.Mirrors[0].Bytes); // the other two sent nothing of the file
     }
 
     [Fact]
@@ -103,11 +106,14 @@ public class SessionDownloadTests
     public async Task A_server_without_range_requests_sends_the_whole_file_over_one_connection()
     {
         using var d = new Download();
-        d.Link(File1).Ranges = false;
+        var link = d.Link(File1);
+        link.Ranges = false;
 
         Assert.Equal(0, await d.RunAsync());
         Assert.Equal(File1, File.ReadAllBytes(d.PathOf("data.bin")));
         Assert.Contains("can't send parts of the file", d.Output);
+        Assert.Equal(2, link.Requests); // one to learn the size, one for the whole file
+        Assert.Equal(0, d.Server.Open);
     }
 
     [Fact]

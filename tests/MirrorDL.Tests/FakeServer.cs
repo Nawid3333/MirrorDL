@@ -14,6 +14,9 @@ sealed class FakeServer : HttpMessageHandler
 {
     readonly Dictionary<string, FakeLink> _links = [];
 
+    /// <summary>Connections still open on any link: after a download, every answer must have been closed.</summary>
+    public int Open => _links.Values.Sum(l => Volatile.Read(ref l.Open));
+
     /// <summary>A link that serves <paramref name="content"/>; its address ends in "file.bin" unless given.</summary>
     public FakeLink Add(string url, byte[] content)
     {

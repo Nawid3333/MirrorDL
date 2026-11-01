@@ -81,6 +81,7 @@ public class EngineFaultTests
         Assert.Equal(0, await d.RunAsync());
         Assert.Equal(File1, File.ReadAllBytes(d.PathOf("data.bin")));
         Assert.Contains(problem, d.Session.Mirrors[1].Problem);
+        Assert.Equal(0, d.Server.Open); // also the answers it gave up on are closed
     }
 
     [Fact]

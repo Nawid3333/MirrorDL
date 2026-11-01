@@ -44,6 +44,7 @@ public class SessionFailureTests
         Assert.Equal(["data.bin.part", "data.bin.part.mirrordl"], d.Files);
         // Nothing of the wrong parts counts as downloaded.
         Assert.Equal([(0L, (long)Size)], PartState.Load(d.PathOf("data.bin.part.mirrordl"))!.Missing);
+        Assert.Equal(0, d.Server.Open);
     }
 
     [Fact]
@@ -105,13 +106,29 @@ public class SessionFailureTests
     public async Task Without_range_requests_stopping_keeps_the_file_and_says_it_starts_over_next_time()
     {
         using var d = new Download();
-        d.Link(File1).Ranges = false;
+        var link = d.Link(File1);
+        link.Ranges = false;
+        link.ChunkDelay = TimeSpan.FromMilliseconds(20);
         using var stop = new CancellationTokenSource();
-        d.OnPhase = phase => { if (phase == Phase.Downloading) stop.Cancel(); };
+        d.OnPhase = phase =>
+        {
+            if (phase != Phase.Downloading) return;
+            var session = d.Session;
+            _ = Task.Run(async () => // stop once some of the file has arrived
+            {
+                while (session.Mirrors[0].Bytes < MB && session.Phase == Phase.Downloading)
+                    await Task.Delay(10, CancellationToken.None);
+                stop.Cancel();
+            }, CancellationToken.None);
+        };
 
         Assert.Equal(130, await d.RunAsync(stop));
         Assert.Equal(Phase.Cancelled, d.Session.Phase);
         Assert.Contains("this server can't continue a download", d.Session.Note);
+        byte[] kept = File.ReadAllBytes(d.PathOf("data.bin.part"));
+        Assert.InRange(kept.Length, MB, Size - 1);
+        Assert.Equal(File1[..kept.Length], kept);
+        Assert.Equal(0, d.Server.Open);
     }
 
     [Fact]
@@ -240,6 +257,8 @@ public class SessionFailureTests
         Assert.Equal(File1, File.ReadAllBytes(d.PathOf("data.bin")));
         var (f, s) = (d.Session.Mirrors[0].Bytes, d.Session.Mirrors[1].Bytes);
         Assert.Equal(Size, f + s);
+        Assert.Null(d.Session.Mirrors[1].Problem); // taken over, not given up
+        Assert.True(s > 0, "the slow link sent nothing");
         Assert.True(f > Size / 2 + MB / 2, $"fast {f}, slow {s}"); // it took over much of the slow link's half
     }
 }
