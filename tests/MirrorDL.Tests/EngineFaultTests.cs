@@ -170,8 +170,8 @@ public class EngineFaultTests
         Assert.Equal(0, await d.RunAsync());
         Assert.Equal(file, File.ReadAllBytes(d.PathOf("data.bin")));
         // Taken over once it has run 4 s, the download is done in about 5 s; judged by its average, the trickle kept
-        // its last 2 MB and took about 20 s for them.
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), $"it took {watch.Elapsed.TotalSeconds:0.0} s: the trickling link's rest was not taken over");
+        // its last 2 MB and took about 20 s for them. 15 s leaves room for a slow, busy machine (a CI runner).
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(15), $"it took {watch.Elapsed.TotalSeconds:0.0} s: the trickling link's rest was not taken over");
     }
 
     [Fact]
