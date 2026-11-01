@@ -140,12 +140,13 @@ try {
     }
     $dir = New-Stitch stitch
     $otherBefore = Hash "$dir\test(2).Q1w2E3r4.bin.part"
-    $run = Invoke-Mirrordl @('-o', $dir, (Url 18001), (Url 18002), $hash)
+    # A newline as input: should a question come (a leftover that doesn't fit), the answer is no, not a wait.
+    $run = Invoke-Mirrordl @('-o', $dir, (Url 18001), (Url 18002), $hash) "`n"
     # The Firefox copy is in the Recycle Bin (only said when Windows reports it arrived there) - or, on a machine
     # whose Recycle Bin can't be sized up (a fresh CI user), kept and said so. Never gone without being in it.
     $leftover = "$dir\test(1).Ab12-xY_.bin.part"
     $recycled = $run.Output -match 'Moved the other unfinished files' -and -not (Test-Path $leftover)
-    $kept = $run.Output -match "Kept test\(1\)\.Ab12-xY_\.bin\.part: it doesn't fit in the Recycle Bin" -and (Test-Path $leftover)
+    $kept = $run.Output -match "Kept, since they can't go to the Recycle Bin: test\(1\)\.Ab12-xY_\.bin\.part" -and (Test-Path $leftover)
     if ($kept) { Write-Host "NOTE  the leftover was kept: this machine's Recycle Bin can't be sized up" -ForegroundColor Yellow }
     Test-Case 'several unfinished files put together' {
         $run.Code -eq 0 -and (Hash "$dir\test.bin") -eq $hash -and
@@ -153,6 +154,23 @@ try {
         $run.Output -match 'test\(2\)\.Q1w2E3r4\.bin\.part is not the same file' -and
         (Hash "$dir\test(2).Q1w2E3r4.bin.part") -eq $otherBefore -and ($recycled -or $kept)
     } $run
+
+    # A leftover that doesn't fit in the Recycle Bin (made so here by MIRRORDL_TEST_NO_RECYCLE_BIN) can only be
+    # deleted for good: kept when the answer is no, deleted without asking with --delete-leftovers. Never the
+    # copy of another file next to it.
+    $env:MIRRORDL_TEST_NO_RECYCLE_BIN = '1'
+    $dir = New-Stitch stitchnoroom
+    $no = Invoke-Mirrordl @('-o', $dir, (Url 18001), (Url 18002), $hash) "`n"
+    $keptNo = (Test-Path "$dir\test(1).Ab12-xY_.bin.part") -and (Hash "$dir\test.bin") -eq $hash
+    $dir = New-Stitch stitchdelete
+    $yes = Invoke-Mirrordl @('-o', $dir, '--delete-leftovers', (Url 18001), (Url 18002), $hash) "`n"
+    Remove-Item Env:MIRRORDL_TEST_NO_RECYCLE_BIN
+    Test-Case "leftovers that don't fit in the Recycle Bin: kept, or deleted for good when asked to" {
+        $no.Code -eq 0 -and $keptNo -and $no.Output -match "Kept, since they can't go to the Recycle Bin: test\(1\)" -and
+        $no.Output -match 'Test mode' -and
+        $yes.Code -eq 0 -and (Hash "$dir\test.bin") -eq $hash -and -not (Test-Path "$dir\test(1).Ab12-xY_.bin.part") -and
+        (Hash "$dir\test(2).Q1w2E3r4.bin.part") -eq $otherBefore -and $yes.Output -match 'Deleted for good: test\(1\)\.Ab12-xY_\.bin\.part'
+    } ([pscustomobject]@{ Code = "$($no.Code) / $($yes.Code)"; Output = $no.Output + $yes.Output })
 
     # The same, but the result doesn't match the checksum given: nothing may be removed then.
     $dir = New-Stitch stitchdamaged
@@ -323,6 +341,7 @@ try {
     }
 }
 finally {
+    Remove-Item Env:MIRRORDL_TEST_NO_RECYCLE_BIN -ErrorAction SilentlyContinue
     $mirrors | ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
     Start-Sleep -Milliseconds 300
     Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue

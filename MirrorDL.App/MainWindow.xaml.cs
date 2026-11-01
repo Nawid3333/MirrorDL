@@ -85,6 +85,7 @@ public sealed partial class MainWindow : Window
             ShowResult(InfoBarSeverity.Warning, "No links", "Paste at least one download link, starting with http:// or https://.");
             return;
         }
+        job.DeleteLeftovers = DeleteLeftoversBox.IsChecked == true;
         await RunAsync(job, ignored);
     }
 
@@ -291,7 +292,7 @@ public sealed partial class MainWindow : Window
         StartButton.IsEnabled = !running;
         PauseButton.IsEnabled = running;
         LinksBox.IsReadOnly = running;
-        foreach (var control in new Control[] { SaveToBox, PartBox, BrowseFolderButton, BrowsePartButton })
+        foreach (var control in new Control[] { SaveToBox, PartBox, BrowseFolderButton, BrowsePartButton, DeleteLeftoversBox })
             control.IsEnabled = !running;
     }
 

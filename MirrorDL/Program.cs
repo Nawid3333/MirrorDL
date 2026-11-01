@@ -60,6 +60,9 @@ static class Program
                 case "-m" or "--max-per-server":
                     job.PerServer = Number(args, ref i);
                     break;
+                case "--delete-leftovers":
+                    job.DeleteLeftovers = true;
+                    break;
                 default:
                     Input.Add(args[i], job, ignored);
                     break;
@@ -165,6 +168,8 @@ static class Program
           -o, --out <folder>         save here (default: Downloads, or next to the .part file)
           -c, --connections <n>      at most n connections in total (default: no limit)
           -m, --max-per-server <n>   at most n connections per link (default: 16)
+          --delete-leftovers         delete leftovers that can't go to the Recycle Bin for good,
+                                     without asking (they are asked about otherwise)
 
         mirrordl finds the number of connections by itself: it adds more as long as they make the
         download faster, and stops where a server or the internet line is the limit.

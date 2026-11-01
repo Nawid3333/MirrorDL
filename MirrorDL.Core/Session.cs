@@ -19,6 +19,11 @@ public sealed class Job
     /// <summary>Limits on the connections, in total and per link; null leaves it all to <see cref="Tuner"/>.</summary>
     public int? Connections { get; set; }
     public int? PerServer { get; set; }
+    /// <summary>
+    /// Leftovers of a stitched download that don't fit in the Recycle Bin are deleted for good without asking;
+    /// otherwise the user is asked once the download is done.
+    /// </summary>
+    public bool DeleteLeftovers { get; set; }
 }
 
 /// <summary>A problem the user can fix: shown as a plain message, without a stack trace.</summary>
@@ -72,6 +77,7 @@ public sealed class Session
     bool _checkOnly;                   // the file was complete already: only checked, never changed
     List<string> _found = [];          // unfinished files of this download: the given ones first
     readonly List<Unfinished> _spare = []; // other unfinished files of this download, not needed once it is done
+    readonly List<Unfinished> _noRoom = []; // of those, the ones kept because they don't fit in the Recycle Bin
     readonly List<string> _skipped = [];
     string? _refusal; // why an unfinished file with the download's name can't be used, if none can
     (byte[][] Reference, List<long> Offsets, int Length)? _pieces; // pieces compared before the download
@@ -81,9 +87,12 @@ public sealed class Session
     /// of it were found to match the links.
     /// </summary>
     sealed record Unfinished(string FilePath, List<(long Start, long End)> Have, bool OnePiece, bool Firefox,
-        long Length = 0, DateTime Written = default, bool Matched = false)
+        long Length = 0, DateTime Written = default, bool Matched = false, DateTime Created = default)
     {
         public string Name => Path.GetFileName(FilePath);
+        /// <summary>Still the file that was read: same size and times, so not written to or replaced since.</summary>
+        public bool Unchanged(FileInfo info) =>
+            info.Length == Length && info.LastWriteTimeUtc == Written && info.CreationTimeUtc == Created;
         public long Bytes => Ranges.Sum(Have);
     }
 
@@ -196,6 +205,8 @@ public sealed class Session
         using var http = CreateClient();
         SetPhase(Phase.Checking);
         Write($"MirrorDL {AppInfo.Version}", LogKind.Dim); // so a copied log says which version it came from
+        if (Native.TestingNoRecycleBin)
+            Write("Test mode (MIRRORDL_TEST_NO_RECYCLE_BIN): no file is moved to the Recycle Bin.", LogKind.Warn);
         Write($"Checking {Format.Plural(_mirrors.Count, "link")}...");
         await Task.WhenAll(_mirrors.Select(m => m.InspectAsync(http, ct)));
         if (!_mirrors.Any(m => m.Usable))
@@ -566,7 +577,7 @@ public sealed class Session
             var missing = length < size ? Ranges.Normalize(state.Missing.Append((length, size))) : state.Missing;
             Write($"Found {name} ({from} progress): {Format.Bytes(size - Ranges.Sum(missing))} " +
                   $"of {Format.Bytes(size)} already downloaded.");
-            return new Unfinished(path, Ranges.Invert(missing, size), false, false, length, info.LastWriteTimeUtc);
+            return new Unfinished(path, Ranges.Invert(missing, size), false, false, length, info.LastWriteTimeUtc, Created: info.CreationTimeUtc);
         }
 
         // No progress file: a browser (or another program) downloaded the beginning of the file in one piece.
@@ -583,7 +594,8 @@ public sealed class Session
             }
         Write(finished ? $"Found {name}: it has the full size ({Format.Bytes(size)})."
                        : $"Found {name}: it holds the first {Format.Bytes(length)} of {Format.Bytes(size)}.");
-        return new Unfinished(path, keep > 0 ? [(0, keep)] : [], true, PartFinder.IsFirefoxPart(path), length, info.LastWriteTimeUtc);
+        return new Unfinished(path, keep > 0 ? [(0, keep)] : [], true, PartFinder.IsFirefoxPart(path), length, info.LastWriteTimeUtc,
+            Created: info.CreationTimeUtc);
     }
 
     /// <summary>
@@ -924,9 +936,62 @@ public sealed class Session
             Write((_checkOnly ? "The file" : "Saved, but it") + $" doesn't match {damage}: either it is damaged, or {why}. " +
                   (_checkOnly ? "It stays as it was: " : "") + path, LogKind.Warn);
         }
+        await DeleteLeftoversAsync();
         if (_job.Checksums.Count == 0)
             Write("Tip: paste the checksum from the download page together with the links, and the whole file gets checked.", LogKind.Dim);
         return ok;
+    }
+
+    /// <summary>
+    /// Leftovers that can't go to the Recycle Bin (too big for it, or their drive has none) can only be deleted for
+    /// good, so only when the user says so: by <see cref="Job.DeleteLeftovers"/>, or when asked now that the finished
+    /// file is saved. Each is checked again first - the answer may come much later - and one that changed, that isn't
+    /// an unfinished download anymore or that another program has open stays.
+    /// </summary>
+    async Task DeleteLeftoversAsync()
+    {
+        if (_noRoom.Count == 0) return;
+        string names = string.Join(", ", _noRoom.Select(f => f.Name));
+        bool delete = _job.DeleteLeftovers || await ConfirmAsync(
+            $"Leftovers of this download that can't go to the Recycle Bin - too big for it, or their drive has none " +
+            $"({Format.Bytes(_noRoom.Sum(f => f.Length))}): {names}. They are not needed anymore. Delete them for good? " +
+            "This can't be undone.");
+        if (!delete)
+        {
+            Write($"Kept, since they can't go to the Recycle Bin: {names}. Delete them yourself when you don't need them anymore.", LogKind.Warn);
+            return;
+        }
+        var deleted = new List<string>();
+        bool Delete(string path)
+        {
+            try
+            {
+                File.Delete(path);
+                deleted.Add(Path.GetFileName(path));
+                return true;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                Write($"Could not delete {Path.GetFileName(path)} ({e.Message.TrimEnd('.')}); it stays where it is.", LogKind.Warn);
+                return false;
+            }
+        }
+        foreach (var other in _noRoom)
+        {
+            var info = new FileInfo(other.FilePath);
+            if (!info.Exists) continue;
+            if (!other.Unchanged(info) || !PartFinder.IsUnfinished(other.FilePath) || InUse(other.FilePath))
+            {
+                Write($"Kept {other.Name}: it changed meanwhile, or another program has it open.", LogKind.Warn);
+                continue;
+            }
+            string? placeholder = PartFinder.FirefoxPlaceholder(other.FilePath);
+            // Its progress file and placeholder only belong to it - and stay with it if it can't go.
+            if (!Delete(other.FilePath)) continue;
+            foreach (string? file in new[] { other.FilePath + ".mirrordl", other.FilePath + ".aria2", placeholder })
+                if (file != null && File.Exists(file)) Delete(file);
+        }
+        if (deleted.Count > 0) Write("Deleted for good: " + string.Join(", ", deleted), LogKind.Info);
     }
 
     /// <summary>
@@ -950,9 +1015,10 @@ public sealed class Session
 
     /// <summary>
     /// Moves the other unfinished files of this download, with their progress files and Firefox's empty
-    /// placeholders, to the Recycle Bin - never deleted for good. Only called once the finished file is complete
-    /// and checked; each of these files was found to be this download, and one that changed since, that another
-    /// program has open, or that isn't an unfinished download at all (the user's own file) is kept.
+    /// placeholders, to the Recycle Bin. Only called once the finished file is complete and checked; each of these
+    /// files was found to be this download, and one that changed since, that another program has open, or that isn't
+    /// an unfinished download at all (the user's own file) is kept. One that can't go to the Recycle Bin is kept for
+    /// <see cref="DeleteLeftoversAsync"/>, which deletes it for good only if the user says so.
     /// </summary>
     void CleanUp()
     {
@@ -981,7 +1047,7 @@ public sealed class Session
         if (!info.Exists) return;
         string? keep = !PartFinder.IsUnfinished(other.FilePath) ? "it isn't an unfinished download (.part, or with a .aria2 or .mirrordl file), so it may be a file of yours"
             : !other.Matched ? "too little of it could be compared to be sure it is this download"
-            : info.Length != other.Length || info.LastWriteTimeUtc != other.Written ? "it changed since it was checked"
+            : !other.Unchanged(info) ? "it changed since it was checked"
             : InUse(other.FilePath) ? "another program has it open"
             : null;
         if (keep != null)
@@ -993,13 +1059,16 @@ public sealed class Session
         // The file itself first: if it can't go, its progress file stays with it - without one, nothing would
         // tell anymore which parts of it are downloaded.
         var result = Native.Recycle(other.FilePath);
-        if (result is Native.Recycled.NoRoom or Native.Recycled.Failed)
+        if (result == Native.Recycled.NoRoom)
         {
-            Write(result == Native.Recycled.NoRoom
-                ? $"Kept {other.Name}: it doesn't fit in the Recycle Bin (or its drive has none, or it is switched off), " +
-                  "and Windows would delete it for good. Delete it yourself if you don't need it anymore. If it is only too " +
-                  "big, make the Recycle Bin bigger: right-click it, Properties, Custom size."
-                : File.Exists(other.FilePath) ? $"Could not move {other.Name} to the Recycle Bin; it stays where it is, with its progress file."
+            // It doesn't fit in the Recycle Bin (or its drive has none, or it is switched off), where Windows would
+            // delete it for good: whether to do that is asked once the finished file is saved.
+            _noRoom.Add(other);
+            return;
+        }
+        if (result == Native.Recycled.Failed)
+        {
+            Write(File.Exists(other.FilePath) ? $"Could not move {other.Name} to the Recycle Bin; it stays where it is, with its progress file."
                 : $"{other.Name} is gone: another program removed it meanwhile.", LogKind.Warn);
             return;
         }

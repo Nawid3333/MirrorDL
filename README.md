@@ -92,6 +92,7 @@ mirrordl "C:\Users\me\Downloads\file.Ab12-xYz.iso.part" "https://a/file.iso"
 | `-o <folder>` | where to save (default: Downloads, or next to the unfinished file) |
 | `-c <n>` | at most n connections in total (default: no limit) |
 | `-m <n>` | at most n connections per link (default: 16) |
+| `--delete-leftovers` | delete leftovers that can't go to the Recycle Bin for good, without asking |
 
 Ctrl+C pauses. Run the same command again to continue.
 
@@ -137,10 +138,14 @@ it open. If anything fails, a download stops, is paused or comes out damaged, no
 Only unfinished downloads are removed: `.part` files, and files with a `.aria2` or `.mirrordl`
 progress file. Any other file you added stays, since it may be one of your own.
 
-MirrorDL only moves them to the Recycle Bin. Windows deletes a file that doesn't fit in the
-Recycle Bin for good, without asking, so MirrorDL keeps such a file where it is and tells you.
-(Should Windows still delete one for good, MirrorDL says so too.) The Recycle Bin of a drive holds a few percent of it at first. For big
-downloads, make it bigger: right-click it, **Properties**, **Custom size**.
+MirrorDL moves them to the Recycle Bin. A file that can't go there - too big for it (the
+Recycle Bin of a drive holds a few percent of it at first), or its drive has none - can only be
+deleted for good, so MirrorDL asks once the download is done, and keeps it if you say no. Tick
+**Delete leftovers that can't go to the Recycle Bin, without asking** (in the terminal:
+`--delete-leftovers`) to have them deleted without the question. Either way, a leftover is
+checked again right before: one that changed or that another program has open stays. (Should Windows delete a file for good while moving it to the Recycle
+Bin, MirrorDL says so.) To have big leftovers go to the Recycle Bin instead, make it bigger:
+right-click it, **Properties**, **Custom size**.
 
 A file from aria2 or MirrorDL needs its progress file (`.aria2` or `.mirrordl`) next to it, since
 only that tells which parts are downloaded. Without it, MirrorDL doesn't use the file.
