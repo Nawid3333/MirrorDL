@@ -896,7 +896,15 @@ public sealed class Session
             string dir = Path.GetDirectoryName(other.FilePath)!;
             var placeholders = PartFinder.FinalNames(other.Name, copies: false).Select(n => Path.Combine(dir, n))
                 .Where(p => !p.Equals(other.FilePath, StringComparison.OrdinalIgnoreCase) && new FileInfo(p) is { Exists: true, Length: 0 });
-            foreach (string file in placeholders.Prepend(other.FilePath + ".aria2").Prepend(other.FilePath + ".mirrordl").Prepend(other.FilePath))
+            // The file itself first: if it can't go, its progress file stays with it - without one, nothing would
+            // tell anymore which parts of it are downloaded.
+            if (!Native.Recycle(other.FilePath))
+            {
+                Write($"Could not remove {other.Name}; it stays where it is, with its progress file.", LogKind.Warn);
+                continue;
+            }
+            removed.Add(other.Name);
+            foreach (string file in placeholders.Prepend(other.FilePath + ".aria2").Prepend(other.FilePath + ".mirrordl"))
             {
                 if (!File.Exists(file)) continue;
                 if (Native.Recycle(file)) removed.Add(Path.GetFileName(file));

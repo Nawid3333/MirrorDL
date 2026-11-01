@@ -241,7 +241,7 @@ static class PartFinder
         found.AddRange(wanted.Select(n => Path.Combine(dir, n)).Where(p => File.Exists(p) && File.Exists(p + ".aria2")));
         return found
             .OrderByDescending(p => File.Exists(p + ".mirrordl") || File.Exists(p + ".aria2"))
-            .ThenByDescending(p => new FileInfo(p).Length)
+            .ThenByDescending(p => new FileInfo(p) is { Exists: true } info ? info.Length : 0) // gone meanwhile: last
             .ToList();
     }
 }
