@@ -49,11 +49,18 @@ function Connect-Store {
 }
 
 # The Store's current submission - the pending one, or else the last published one: where it is, and
-# whether it holds this version.
+# whether it holds this version. Asked again when asking fails on the way: a failed answer is no answer,
+# not a sign that this version is gone.
 function Get-Submission {
-    $status = Invoke-Msstore submission status $ProductId
+    for ($attempt = 1; ; $attempt++) {
+        $status = Invoke-Msstore submission status $ProductId
+        $details = Invoke-Msstore submission get $ProductId
+        if ($status.Code -eq 0 -and $details.Code -eq 0) { break }
+        if ($attempt -eq 3) { throw "Asking the Store for its submission failed 3 times.`n$($status.Text)`n$($details.Text)" }
+        Write-Host "Asking the Store failed; trying again in $(15 * $attempt) s."
+        Start-Sleep -Seconds (15 * $attempt)
+    }
     $name = if ($status.Text -match '(?s).*Status\s*[-=]\s*(\w+)') { $Matches[1] } else { 'Unknown' }
-    $details = Invoke-Msstore submission get $ProductId
     [pscustomobject]@{ Status = $name; Ours = $details.Text.Contains("`"$storeVersion`""); Text = $status.Text.Trim() }
 }
 
@@ -150,23 +157,28 @@ Connect-Store
 
 if ($Action -eq 'submit') {
     for ($attempt = 1; ; $attempt++) {
-        # Already there, or under way - from an earlier try, or a re-run of this job? A new publish would delete
-        # that submission and start over, so it is left alone.
-        $submission = Get-Submission
-        if ($submission.Ours -and $submission.Status -in $underWay + 'Published') {
-            Write-Host "The submission of $storeVersion is under way already ($($submission.Status))."
-            break
+        try {
+            # Already there, or under way - from an earlier try, or a re-run of this job? A new publish would
+            # delete that submission and start over, so it is left alone.
+            $submission = Get-Submission
+            if ($submission.Ours -and $submission.Status -in $underWay + 'Published') {
+                Write-Host "The submission of $storeVersion is under way already ($($submission.Status))."
+                break
+            }
+            if ($attempt -le 3) {
+                # Uploads the package into a new draft (replacing a draft an earlier try left), puts this
+                # release's notes in, and commits it.
+                & msstore publish (Resolve-Path $Package).Path -id $ProductId --noCommit
+                if ($LASTEXITCODE -eq 0) {
+                    # Without its notes the version goes out all the same, with the last version's; the run says so.
+                    $withNotes = try { Set-ReleaseNotes $notes } catch { Write-Host $_.Exception.Message; $false }
+                    if (-not $withNotes) { Write-Host "::warning::Putting the release's notes into the Store's submission failed; it keeps the last version's. Send them later with the Store notes workflow (docs/microsoft-store.md)." }
+                    if (Complete-Submission) { break }
+                }
+            }
         }
+        catch { Write-Host $_.Exception.Message }
         if ($attempt -gt 3) { throw "Submitting $storeVersion failed 3 times; the Store's submission is at $($submission.Status)." }
-        # Uploads the package into a new draft (replacing a draft an earlier try left), puts this release's
-        # notes in, and commits it.
-        & msstore publish (Resolve-Path $Package).Path -id $ProductId --noCommit
-        if ($LASTEXITCODE -eq 0) {
-            # Without its notes the version goes out all the same, with the last version's; the run says so.
-            $withNotes = try { Set-ReleaseNotes $notes } catch { Write-Host $_.Exception.Message; $false }
-            if (-not $withNotes) { Write-Host "::warning::Putting the release's notes into the Store's submission failed; it keeps the last version's. Send them later with the Store notes workflow (docs/microsoft-store.md)." }
-            if (Complete-Submission) { break }
-        }
         # It went wrong on the way - perhaps only after Microsoft had taken it on, which the Store may not show
         # at once: wait before looking again.
         Write-Host "Submitting failed; looking again in $(60 * $attempt) s."
