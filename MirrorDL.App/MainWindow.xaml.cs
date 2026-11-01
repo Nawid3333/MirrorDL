@@ -175,7 +175,9 @@ public sealed partial class MainWindow : Window
         double percent = verifying ? s.VerifyPercent : s.Percent;
 
         FileText.Text = session.Target?.Name ?? "Checking the links…";
-        PhaseText.Text = Describe(s);
+        // Until the pause is done (saving the progress of a big file takes a moment), say that it is coming.
+        bool pausing = _cts?.IsCancellationRequested == true && _run is { IsCompleted: false };
+        PhaseText.Text = pausing ? "Pausing and saving the progress…" : Describe(s);
         Progress.IsIndeterminate = s.Phase is Phase.Starting or Phase.Checking or Phase.Comparing or Phase.Finishing;
         Progress.Value = percent;
         Progress.ShowPaused = s.Phase is Phase.Paused or Phase.Cancelled;

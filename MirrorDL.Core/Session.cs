@@ -375,6 +375,7 @@ public sealed class Session
         _engine = engine;
         Task saving = Task.CompletedTask;
         long nextSave = Environment.TickCount64 + SaveIntervalMs;
+        bool saveFailed = false; // said once: it is tried again every few seconds
 
         void Save()
         {
@@ -393,7 +394,14 @@ public sealed class Session
                 if (Environment.TickCount64 >= nextSave && saving.IsCompleted)
                 {
                     nextSave = Environment.TickCount64 + SaveIntervalMs;
-                    saving = Task.Run(Save);
+                    saving = Task.Run(Save).ContinueWith(t =>
+                    {
+                        if (t.Exception?.GetBaseException() is { } e && !saveFailed)
+                        {
+                            saveFailed = true;
+                            Write("Could not save the progress for now (it is tried again): " + e.Message, LogKind.Warn);
+                        }
+                    }, TaskScheduler.Default);
                 }
             }, ct);
         }
@@ -919,10 +927,6 @@ public sealed class Session
                 }
             }
         }
-        // The file is complete: its progress files aren't needed anymore. One that can't go yet (a virus scanner
-        // has it open, say) is tried again once the file has its name - it doesn't fail the download.
-        RemoveProgressFiles(target, warn: false);
-
         // Before the file gets its name, so that a leftover can't take the name first.
         if (ok) CleanUp();
         else if (_spare.Any(f => File.Exists(f.FilePath)))
@@ -942,7 +946,8 @@ public sealed class Session
             path = FreePath(path);
             File.Move(target.PartPath, path);
         }
-        RemoveProgressFiles(target, warn: true);
+        // Only now: should the file not get its name (the drive full, say), the progress file still tells all.
+        RemoveProgressFiles(target);
         SavedPath = path;
         if (SizeOnly)
             Write($"{target.Name} has the right size, but there was nothing to compare its content with: these links " +
@@ -961,16 +966,18 @@ public sealed class Session
         return ok;
     }
 
-    /// <summary>Deletes the progress files of a finished download; one that can't go is mentioned if <paramref name="warn"/>.</summary>
-    void RemoveProgressFiles(Target target, bool warn)
+    /// <summary>
+    /// Deletes the progress files of a finished download. One that can't go (a virus scanner has it open, say)
+    /// does no harm, so it is only mentioned - it doesn't fail the download.
+    /// </summary>
+    void RemoveProgressFiles(Target target)
     {
         foreach (string progress in new[] { target.StatePath, target.Aria2Path })
             try { File.Delete(progress); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
-                if (warn)
-                    Write($"Could not remove {Path.GetFileName(progress)} ({e.Message.TrimEnd('.')}); it isn't needed anymore " +
-                          "and can be deleted.", LogKind.Warn);
+                Write($"Could not remove {Path.GetFileName(progress)} ({e.Message.TrimEnd('.')}); it isn't needed anymore " +
+                      "and can be deleted.", LogKind.Warn);
             }
     }
 

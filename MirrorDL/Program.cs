@@ -135,12 +135,13 @@ static class Program
         Usage:
           mirrordl                       asks you to paste the links
           mirrordl [options] <input>...  inputs: links, unfinished files to continue (any name), a .txt
-                                         file with links, a checksum (MD5/SHA-1/SHA-256/SHA-512), a folder
+                                         file with links, a checksum (MD5/SHA-1/SHA-256/SHA-384/SHA-512),
+                                         a folder
 
         Options:
-          -o, --out <folder>         save here (default: Downloads, or next to the .part file)
-          -c, --connections <n>      at most n connections in total (default: no limit)
-          -m, --max-per-server <n>   at most n connections per link (default: 16)
+          -o, --out <folder>         save here (default: Downloads, or next to the unfinished file given)
+          -c, --connections <n>      at most n connections in total, 1 to 64 (default: no limit)
+          -m, --max-per-server <n>   at most n connections per link, 1 to 64 (default: 16)
           --delete-leftovers         delete leftovers that can't go to the Recycle Bin for good,
                                      without asking (they are asked about otherwise)
 

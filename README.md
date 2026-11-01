@@ -90,8 +90,8 @@ mirrordl "C:\Users\me\Downloads\file.Ab12-xYz.iso.part" "https://a/file.iso"
 | Option | Meaning |
 |---|---|
 | `-o <folder>` | where to save (default: Downloads, or next to the unfinished file) |
-| `-c <n>` | at most n connections in total (default: no limit) |
-| `-m <n>` | at most n connections per link (default: 16) |
+| `-c <n>` | at most n connections in total, 1 to 64 (default: no limit) |
+| `-m <n>` | at most n connections per link, 1 to 64 (default: 16) |
 | `--delete-leftovers` | delete leftovers that can't go to the Recycle Bin for good, without asking |
 
 Ctrl+C pauses. Run the same command again to continue.

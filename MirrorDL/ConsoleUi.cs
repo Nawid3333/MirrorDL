@@ -45,7 +45,7 @@ static class Ui
         foreach (string part in job.PartFiles)
             Console.WriteLine($"Continuing: {part}");
         Console.WriteLine("Paste the download links for one file (one per line), then press Enter on an empty line.");
-        Dim("You can also paste a checksum (MD5/SHA-1/SHA-256/SHA-512), drag in unfinished downloads of the file");
+        Dim("You can also paste a checksum (MD5/SHA-1/SHA-256/SHA-384/SHA-512), drag in unfinished downloads of the file");
         Dim("(from mirrordl, Firefox, aria2, any name) to continue them, or drag in a folder to save the file there.");
         Console.WriteLine();
         while (Console.ReadLine() is { } line)
