@@ -185,10 +185,20 @@ dotnet test --project tests/MirrorDL.Tests/MirrorDL.Tests.csproj
 pwsh tools/e2e-test.ps1 -Exe MirrorDL/bin/Debug/net10.0/win-x64/mirrordl.exe
 ```
 
+The unit tests run whole downloads against web servers in memory (`FakeServer`): new downloads,
+continuing MirrorDL's, Firefox's and aria2's unfinished files, putting several together, checking
+finished files, and links that fail in every way - in about 15 seconds, without network or ports.
+A file "moved to the Recycle Bin" goes to a folder of the test instead. To see how much of the code
+they reach:
+
+```
+dotnet test --project tests/MirrorDL.Tests/MirrorDL.Tests.csproj --coverage --coverage-output-format cobertura
+```
+
 The end-to-end test starts local test mirrors (`tools/testserver.py`, which needs Python) that are
 slow, drop connections, limit connections, serve another file or ignore range requests, downloads
-from them, and checks every result by its SHA-256. With aria2 installed, it also continues a
-download that aria2 started.
+from them with the real program, and checks every result by its SHA-256. It also moves leftovers to
+the real Recycle Bin. With aria2 installed, it also continues a download that aria2 started.
 
 ### Releases
 

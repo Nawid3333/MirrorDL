@@ -199,8 +199,8 @@ public class Aria2ControlTests
 {
     const uint Piece = 1 << 20;
 
-    /// <summary>A control file as aria2 writes it: no BitTorrent info hash and no pieces in flight.</summary>
-    static byte[] ControlFile(bool bigEndian, ulong total, params byte[] bitfield)
+    /// <summary>A control file as aria2 writes it: no BitTorrent info hash and no pieces in flight. Pieces of 1 MB.</summary>
+    internal static byte[] ControlFile(bool bigEndian, ulong total, params byte[] bitfield)
     {
         var data = new List<byte>(bigEndian ? [0, 1] : [0, 0]);
         void U32(uint v) { var b = new byte[4]; if (bigEndian) BinaryPrimitives.WriteUInt32BigEndian(b, v); else BinaryPrimitives.WriteUInt32LittleEndian(b, v); data.AddRange(b); }

@@ -12,6 +12,8 @@ public class MirrorTests
     [InlineData("dir\\name.txt", "name.txt")]
     [InlineData("what?.zip", "what_.zip")]
     [InlineData("trailing...", "trailing")]
+    [InlineData("report .", "report")]        // Windows drops dots and spaces at the end
+    [InlineData("report. .", "report")]
     [InlineData("..", "download")]
     [InlineData("nul.iso", "_nul.iso")]
     [InlineData("CON", "_CON")]

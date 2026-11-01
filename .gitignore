@@ -4,3 +4,4 @@ publish/
 .vs/
 *.user
 download.pdf
+TestResults/

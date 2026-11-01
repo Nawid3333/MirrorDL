@@ -26,6 +26,33 @@ public class NativeTests
     }
 
     [Fact]
+    public void Recycle_of_a_file_that_is_gone_fails_and_touches_nothing()
+    {
+        using var folder = new TempFolder();
+        Assert.Equal(Native.Recycled.Failed, Native.Recycle(Path.Combine(folder.Path, "gone.bin")));
+    }
+
+    [Fact]
+    public void DownloadsFolder_is_a_folder_that_exists() => Assert.True(Directory.Exists(Native.DownloadsFolder()));
+
+    [Fact]
+    public void Tests_run_unpackaged_and_without_a_console_of_their_own()
+    {
+        Assert.False(Native.IsPackaged());
+        Assert.False(Native.OwnsConsole());
+    }
+
+    [Fact]
+    public void Flush_writes_through_to_the_disk_without_complaint()
+    {
+        using var folder = new TempFolder();
+        using var handle = File.OpenHandle(Path.Combine(folder.Path, "f.bin"), FileMode.Create, FileAccess.ReadWrite);
+        RandomAccess.Write(handle, new byte[] { 1, 2, 3 }, 0);
+        Native.Flush(handle);
+        Assert.Equal(3, RandomAccess.GetLength(handle));
+    }
+
+    [Fact]
     public void Recycle_keeps_a_file_too_big_for_the_Recycle_Bin_instead_of_deleting_it_for_good()
     {
         Assert.SkipUnless(OperatingSystem.IsWindows(), "Only Windows has a Recycle Bin.");
