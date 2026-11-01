@@ -28,6 +28,7 @@ public sealed partial class MainWindow : Window
     Status? _status;
     bool _closeWhenStopped;
     Uri? _updatePage;
+    ContentDialog? _question; // a question of the download that waits for an answer
 
     public MainWindow()
     {
@@ -48,7 +49,15 @@ public sealed partial class MainWindow : Window
 
         // Files dropped on MirrorDL.exe, or links passed on the command line; --start starts right away.
         var args = Environment.GetCommandLineArgs().Skip(1).ToList();
-        foreach (string arg in args.Where(a => a != "--start")) Use(arg);
+        foreach (string arg in args.Where(a => a != "--start"))
+        {
+            // A .txt file that can't be read (in use, only in the cloud) must not keep the window from opening.
+            try { Use(arg); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                ShowResult(InfoBarSeverity.Warning, "Couldn't use what was given", $"{arg}: {ex.Message}");
+            }
+        }
         if (args.Contains("--start"))
             Root.Loaded += (_, _) => Start_Click(this, new RoutedEventArgs());
     }
@@ -144,6 +153,7 @@ public sealed partial class MainWindow : Window
     void Pause_Click(object sender, RoutedEventArgs e)
     {
         _cts?.Cancel();
+        _question?.Hide(); // an open question counts as "no", so the download can stop
         PauseButton.IsEnabled = false;
         PhaseText.Text = "Pausing and saving the progress…";
     }
@@ -303,22 +313,42 @@ public sealed partial class MainWindow : Window
         LogList.ScrollIntoView(line);
     }
 
+    /// <summary>Asks the download's question; "no" when it is closed without an answer (Pause, closing the window).</summary>
     Task<bool> ConfirmAsync(string question)
     {
         var answer = new TaskCompletionSource<bool>();
-        DispatcherQueue.TryEnqueue(async () =>
+        bool queued = DispatcherQueue.TryEnqueue(async () =>
         {
-            var dialog = new ContentDialog
+            // async void: an exception here would end the app - and leave the download waiting for ever.
+            try
             {
-                XamlRoot = Root.XamlRoot,
-                Title = "MirrorDL",
-                Content = question,
-                PrimaryButtonText = "Yes",
-                CloseButtonText = "No",
-                DefaultButton = ContentDialogButton.Close,
-            };
-            answer.SetResult(await dialog.ShowAsync() == ContentDialogResult.Primary);
+                if (_cts?.IsCancellationRequested == true)
+                {
+                    answer.TrySetResult(false); // asked just after Pause: no dialog to stand in the way of stopping
+                    return;
+                }
+                _question = new ContentDialog
+                {
+                    XamlRoot = Root.XamlRoot,
+                    Title = "MirrorDL",
+                    Content = question,
+                    PrimaryButtonText = "Yes",
+                    CloseButtonText = "No",
+                    DefaultButton = ContentDialogButton.Close,
+                };
+                answer.TrySetResult(await _question.ShowAsync() == ContentDialogResult.Primary);
+            }
+            catch (Exception ex)
+            {
+                AddLog("Could not ask: " + ex.Message, LogKind.Warn);
+                answer.TrySetResult(false);
+            }
+            finally
+            {
+                _question = null;
+            }
         });
+        if (!queued) answer.TrySetResult(false); // the window is going away
         return answer.Task;
     }
 

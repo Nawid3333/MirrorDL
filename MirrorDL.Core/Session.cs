@@ -134,6 +134,10 @@ public sealed class Session
     public event Action? LinksChecked;
     /// <summary>Asks the user a yes/no question.</summary>
     public Func<string, Task<bool>> ConfirmAsync { get; set; } = _ => Task.FromResult(false);
+    /// <summary>For tests: answers the HTTP requests instead of the network.</summary>
+    internal HttpMessageHandler? Handler { get; init; }
+    /// <summary>For tests: what moving a file to the Recycle Bin does, so that a test never fills the real one.</summary>
+    internal Func<string, Native.Recycled> Recycle { get; init; } = Native.Recycle;
 
     /// <summary>Returns 0 when done, 1 on an error, 2 when the checksum doesn't match, 130 when paused or cancelled.</summary>
     public async Task<int> RunAsync(CancellationToken ct)
@@ -202,7 +206,7 @@ public sealed class Session
 
     async Task<int> RunCoreAsync(CancellationToken ct)
     {
-        using var http = CreateClient();
+        using var http = CreateClient(Handler);
         SetPhase(Phase.Checking);
         Write($"MirrorDL {AppInfo.Version}", LogKind.Dim); // so a copied log says which version it came from
         if (Native.TestingNoRecycleBin)
@@ -216,8 +220,9 @@ public sealed class Session
         }
 
         // A link with another size than most of the others leads to a different file.
+        // Links that don't tell the size can't be compared or continued: they only win when no link tells it.
         var bySize = _mirrors.Where(m => m.Usable).GroupBy(m => m.Size)
-            .OrderByDescending(g => g.Count()).ThenBy(g => g.Min(m => m.Index)).ToList();
+            .OrderByDescending(g => g.Key != null).ThenByDescending(g => g.Count()).ThenBy(g => g.Min(m => m.Index)).ToList();
         foreach (var m in bySize.Skip(1).SelectMany(g => g))
             m.Problem = $"different size ({(m.Size is long s ? Format.Bytes(s) : "unknown")}), skipped";
         var group = bySize[0].ToList();
@@ -447,10 +452,17 @@ public sealed class Session
         SetPhase(Phase.Copying);
         var copied = new List<(long Start, long End)>();
         var buffer = new byte[1 << 20];
+        long shown = 0; // when _missing was last updated: only for the display, so not after every piece
         try
         {
             foreach (var (other, take) in plan)
             {
+                // Compared a while ago: if another program wrote to it since, what it holds is not trusted anymore.
+                if (new FileInfo(other.FilePath) is not { Exists: true } now || !other.Unchanged(now))
+                {
+                    Write($"{other.Name} changed since it was compared; what it holds is downloaded instead.", LogKind.Warn);
+                    continue;
+                }
                 SafeFileHandle source;
                 try
                 {
@@ -484,7 +496,11 @@ public sealed class Session
                         if (copied.Count > 0 && copied[^1].End == pos) copied[^1] = (copied[^1].Start, pos + read);
                         else copied.Add((pos, pos + read));
                         pos += read;
-                        _missing = Ranges.Subtract(missing, copied);
+                        if (Environment.TickCount64 - shown >= 250)
+                        {
+                            _missing = Ranges.Subtract(missing, copied);
+                            shown = Environment.TickCount64;
+                        }
                     }
                     if (failure != null) break;
                 }
@@ -500,19 +516,19 @@ public sealed class Session
         }
         finally
         {
-            // Only what is on the disk counts as done.
-            Native.Flush(file);
-            missing = Ranges.Subtract(missing, copied);
-            _missing = missing;
             try
             {
-                new PartState(size, missing).Save(statePath);
+                // Only what is on the disk counts as done: saved only once it is there.
+                Native.Flush(file);
+                new PartState(size, Ranges.Subtract(missing, copied)).Save(statePath);
+                missing = Ranges.Subtract(missing, copied);
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
                 // The progress file keeps what it had before the copying, which is less but true.
                 Write("Could not save the progress: " + e.Message, LogKind.Warn);
             }
+            _missing = missing;
         }
         return missing;
     }
@@ -868,6 +884,7 @@ public sealed class Session
             using (var stream = new FileStream(target.PartPath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read))
             {
                 Native.SetSparse(stream.SafeFileHandle, false);
+                Native.Flush(stream.SafeFileHandle); // on the disk before it is called saved, also without a progress file
                 length = stream.Length;
             }
         if (Size is long size && length != size)
@@ -902,8 +919,9 @@ public sealed class Session
                 }
             }
         }
-        File.Delete(target.StatePath);
-        File.Delete(target.Aria2Path);
+        // The file is complete: its progress files aren't needed anymore. One that can't go yet (a virus scanner
+        // has it open, say) is tried again once the file has its name - it doesn't fail the download.
+        RemoveProgressFiles(target, warn: false);
 
         // Before the file gets its name, so that a leftover can't take the name first.
         if (ok) CleanUp();
@@ -924,6 +942,7 @@ public sealed class Session
             path = FreePath(path);
             File.Move(target.PartPath, path);
         }
+        RemoveProgressFiles(target, warn: true);
         SavedPath = path;
         if (SizeOnly)
             Write($"{target.Name} has the right size, but there was nothing to compare its content with: these links " +
@@ -940,6 +959,19 @@ public sealed class Session
         if (_job.Checksums.Count == 0)
             Write("Tip: paste the checksum from the download page together with the links, and the whole file gets checked.", LogKind.Dim);
         return ok;
+    }
+
+    /// <summary>Deletes the progress files of a finished download; one that can't go is mentioned if <paramref name="warn"/>.</summary>
+    void RemoveProgressFiles(Target target, bool warn)
+    {
+        foreach (string progress in new[] { target.StatePath, target.Aria2Path })
+            try { File.Delete(progress); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                if (warn)
+                    Write($"Could not remove {Path.GetFileName(progress)} ({e.Message.TrimEnd('.')}); it isn't needed anymore " +
+                          "and can be deleted.", LogKind.Warn);
+            }
     }
 
     /// <summary>
@@ -1058,7 +1090,7 @@ public sealed class Session
         string? placeholder = PartFinder.FirefoxPlaceholder(other.FilePath);
         // The file itself first: if it can't go, its progress file stays with it - without one, nothing would
         // tell anymore which parts of it are downloaded.
-        var result = Native.Recycle(other.FilePath);
+        var result = Recycle(other.FilePath);
         if (result == Native.Recycled.NoRoom)
         {
             // It doesn't fit in the Recycle Bin (or its drive has none, or it is switched off), where Windows would
@@ -1079,7 +1111,7 @@ public sealed class Session
         foreach (string? file in new[] { other.FilePath + ".mirrordl", other.FilePath + ".aria2", placeholder })
         {
             if (file == null || !File.Exists(file)) continue;
-            if (Native.Recycle(file) == Native.Recycled.Yes) removed.Add(Path.GetFileName(file));
+            if (Recycle(file) == Native.Recycled.Yes) removed.Add(Path.GetFileName(file));
             else Write(File.Exists(file) ? $"Could not move {Path.GetFileName(file)} to the Recycle Bin; it stays where it is."
                                          : $"{Path.GetFileName(file)} is gone, but not to the Recycle Bin.", LogKind.Warn);
         }
@@ -1147,16 +1179,17 @@ public sealed class Session
 
     void Write(string text, LogKind kind = LogKind.Info) => Log?.Invoke(text, kind);
 
-    static HttpClient CreateClient()
+    static HttpClient CreateClient(HttpMessageHandler? handler)
     {
-        var handler = new SocketsHttpHandler
+        bool own = handler == null; // a test's handler stays the test's
+        handler ??= new SocketsHttpHandler
         {
             AutomaticDecompression = DecompressionMethods.None, // keep the bytes exactly as the server has them
             ConnectTimeout = TimeSpan.FromSeconds(30),
             PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30),
             MaxAutomaticRedirections = 20,
         };
-        var http = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        var http = new HttpClient(handler, disposeHandler: own) { Timeout = Timeout.InfiniteTimeSpan };
         http.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
         http.DefaultRequestHeaders.Accept.ParseAdd("*/*");
         return http;

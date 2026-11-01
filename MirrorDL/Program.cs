@@ -22,6 +22,13 @@ static class Program
             Ui.Error(e.Message);
             return 1;
         }
+        catch (Exception e)
+        {
+            // A bug: still the exit code scripts know for an error, with what is needed to report it.
+            Console.WriteLine();
+            Ui.Error("Unexpected error: " + e);
+            return 1;
+        }
         finally
         {
             if (pause)
@@ -36,37 +43,14 @@ static class Program
     {
         var job = new Job();
         var ignored = new List<string>();
-        for (int i = 0; i < args.Length; i++)
+        switch (CommandLine.Parse(args, job, ignored))
         {
-            switch (args[i])
-            {
-                case "-h" or "--help" or "/?":
-                    Console.WriteLine(Help.Replace("{version}", AppInfo.Version));
-                    return 0;
-                case "--version":
-                    Console.WriteLine($"mirrordl {AppInfo.Version}");
-                    return 0;
-                case "-o" or "--out":
-                    string folder = Value(args, ref i);
-                    try { job.OutDir = Path.GetFullPath(folder); }
-                    catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
-                    {
-                        throw new UserError($"Can't use \"{folder}\" as the folder to save in: {e.Message}");
-                    }
-                    break;
-                case "-c" or "--connections":
-                    job.Connections = Number(args, ref i);
-                    break;
-                case "-m" or "--max-per-server":
-                    job.PerServer = Number(args, ref i);
-                    break;
-                case "--delete-leftovers":
-                    job.DeleteLeftovers = true;
-                    break;
-                default:
-                    Input.Add(args[i], job, ignored);
-                    break;
-            }
+            case CommandLine.Request.Help:
+                Console.WriteLine(Help.Replace("{version}", AppInfo.Version));
+                return 0;
+            case CommandLine.Request.Version:
+                Console.WriteLine($"mirrordl {AppInfo.Version}");
+                return 0;
         }
 
         if (job.Urls.Count == 0)
@@ -143,17 +127,6 @@ static class Program
         {
             Console.CancelKeyPress -= onCtrlC;
         }
-    }
-
-    static string Value(string[] args, ref int i) =>
-        ++i < args.Length ? args[i] : throw new UserError($"{args[i - 1]} needs a value.");
-
-    static int Number(string[] args, ref int i)
-    {
-        string option = args[i];
-        return int.TryParse(Value(args, ref i), out int n) && n is >= 1 and <= 64
-            ? n
-            : throw new UserError($"{option} needs a number from 1 to 64.");
     }
 
     const string Help = """

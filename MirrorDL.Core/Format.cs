@@ -31,7 +31,8 @@ public static class Format
         return unit == 0 ? $"{bytes} B" : value.ToString("0.00", CultureInfo.InvariantCulture) + " " + units[unit];
     }
 
-    public static string Speed(double bytesPerSecond) => Bytes((long)bytesPerSecond) + "/s";
+    public static string Speed(double bytesPerSecond) =>
+        double.IsFinite(bytesPerSecond) && bytesPerSecond >= 0 ? Bytes((long)bytesPerSecond) + "/s" : "--";
 
     public static string Duration(double seconds)
     {

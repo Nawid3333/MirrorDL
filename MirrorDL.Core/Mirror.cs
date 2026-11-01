@@ -157,7 +157,8 @@ public sealed class Mirror(int index, Uri url)
         name = name.Trim().Trim('"');
         name = name[(name.LastIndexOfAny(['/', '\\']) + 1)..];
         char[] invalid = Path.GetInvalidFileNameChars();
-        name = new string(name.Select(c => invalid.Contains(c) ? '_' : c).ToArray()).Trim().TrimEnd('.');
+        // Windows drops dots and spaces at the end of a name, so "a ." would be a different name than it looks.
+        name = new string(name.Select(c => invalid.Contains(c) ? '_' : c).ToArray()).Trim().TrimEnd('.', ' ');
         if (name.Length == 0) return "download";
         string stem = name.Split('.')[0].TrimEnd();
         return DeviceNames.Contains(stem) ? "_" + name : name;
