@@ -30,6 +30,7 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
     public static readonly TimeSpan StallTimeout = TimeSpan.FromSeconds(60);
     const int BufferSize = 256 * 1024;
     const long MinSplit = 1 << 20;
+    const int BusyRetries = 8; // "busy" answers in a row a connection waits out before it leaves the link
     static readonly TimeSpan EndgameWait = TimeSpan.FromSeconds(5);
 
     enum Next { Retry, Stop, Left }
@@ -40,6 +41,15 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
         public long Reserved = start; // everything before Reserved is written or being written
         public long End = end;        // shrinks when another connection takes over the second half
         public readonly long Start = start, Since = Environment.TickCount64; // to tell how fast it goes
+        // Where it was a second or two ago, for its speed of the last seconds (see Lagging).
+        public long MarkPos = start, MarkTime = Environment.TickCount64, EarlierPos = start, EarlierTime = Environment.TickCount64;
+
+        /// <summary>Notes the progress at most once a second: the last mark and the one before it.</summary>
+        public void Mark(long now)
+        {
+            if (now - MarkTime < 1000) return;
+            (EarlierPos, EarlierTime, MarkPos, MarkTime) = (MarkPos, MarkTime, Pos, now);
+        }
     }
 
     readonly object _lock = new();
@@ -124,7 +134,7 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
     async Task WorkerAsync(Mirror m, CancellationToken ct)
     {
         var buffer = new byte[BufferSize];
-        int failures = 0;
+        int failures = 0, busy = 0; // errors in a row; "busy" answers in a row, counted apart
         double rate = 0; // bytes per second this connection made on its last piece of work
         bool counted = true; // still in m.Workers
         try
@@ -172,11 +182,18 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
                 }
                 if (error == null)
                 {
-                    failures = 0;
+                    failures = busy = 0;
                     continue;
                 }
                 if (ct.IsCancellationRequested) return;
-                var next = await RecoverAsync(m, error, ++failures, ct);
+                // "Busy" (429, 503) while the link's other connections get data: waited out for a second or two, the
+                // connection keeping its place and the link its connections - not an error, the link works. Ending
+                // it at once cost half the speed against a host allowing 4 connections at once, since the Tuner then
+                // rests the link before trying more again (docs/speed.md). Still busy after BusyRetries tries in a
+                // row: the host doesn't want this many, and the connection leaves as for any other refusal.
+                var next = error is SourceError { Status: 429 or 503 } && OthersWork(m) && ++busy <= BusyRetries
+                    ? await WaitBusyAsync(m, error, busy, ct)
+                    : await RecoverAsync(m, error, ++failures, ct);
                 if (next == Next.Left) counted = false;
                 if (next != Next.Retry) return;
             }
@@ -204,12 +221,29 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
         }
     }
 
-    /// <summary>Decides what to do after a failed request: try again after a pause, or end this connection.</summary>
-    async Task<Next> RecoverAsync(Mirror m, Exception error, int failures, CancellationToken ct)
+    /// <summary>Whether the link's other connections get data: then a refusal is about this connection, not the link.</summary>
+    static bool OthersWork(Mirror m) =>
+        Volatile.Read(ref m.Workers) > 1 && Environment.TickCount64 - Volatile.Read(ref m.LastData) < 5000;
+
+    static string Note(Mirror m, Exception error)
     {
         string message = error is OperationCanceledException ? "no data for 60 s" : Format.Short(error);
         m.LastError = message;
         Volatile.Write(ref m.LastErrorAt, Environment.TickCount64);
+        return message;
+    }
+
+    static async Task<Next> WaitBusyAsync(Mirror m, Exception error, int busy, CancellationToken ct)
+    {
+        Note(m, error);
+        await Task.Delay(TimeSpan.FromSeconds(Math.Min(2, busy)), ct);
+        return Next.Retry;
+    }
+
+    /// <summary>Decides what to do after a failed request: try again after a pause, or end this connection.</summary>
+    async Task<Next> RecoverAsync(Mirror m, Exception error, int failures, CancellationToken ct)
+    {
+        string message = Note(m, error);
 
         var source = error as SourceError;
         if (source is { Fatal: true })
@@ -219,14 +253,11 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
         }
         if (source is { Status: > 0 })
         {
-            bool othersWork = Volatile.Read(ref m.Workers) > 1
-                && Environment.TickCount64 - Volatile.Read(ref m.LastData) < 5000;
-            if (othersWork)
+            if (OthersWork(m))
             {
-                // The link works but doesn't allow this many connections - or the server had a moment of trouble,
-                // which looks the same: this one ends, and the link goes on with the ones it has left. Counted down
-                // first, so no other connection leaves as well. Whether more pay off again later, Tuner finds out;
-                // it waits longer each time a link refuses them.
+                // The link works but doesn't allow this many connections: this one ends, and the link goes on with
+                // the ones it has left. Counted down first, so no other connection leaves as well. Whether more pay
+                // off again later, Tuner finds out; it waits longer each time a link refuses them.
                 int left = Interlocked.Decrement(ref m.Workers);
                 lock (m) m.Cap = Math.Max(1, Math.Min(m.Cap, left));
                 return Next.Left;
@@ -300,7 +331,11 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
                 {
                     throw new WriteError(e);
                 }
-                lock (_lock) segment.Pos = at + take;
+                lock (_lock)
+                {
+                    segment.Pos = at + take;
+                    segment.Mark(Environment.TickCount64);
+                }
                 m.GotData(take);
             }
             if (take < read) return true; // another connection took over the rest
@@ -348,7 +383,9 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
     /// <summary>
     /// The segment a connection going at <paramref name="mine"/> would finish far sooner: one that has run
     /// for a few seconds (so a connection still getting up to speed isn't judged), would still need more than
-    /// <see cref="EndgameWait"/> at the speed it made so far, and goes at under a third of <paramref name="mine"/>.
+    /// <see cref="EndgameWait"/> at its speed, and goes at under a third of <paramref name="mine"/>. Its speed is
+    /// the lower of its average and that of its last seconds: a link that starts fast and then slows down to a
+    /// trickle keeps a high average for long, and its rest was taken over 4 times later (docs/speed.md).
     /// The margin keeps two connections from handing a part back and forth, since each hand-over starts a new
     /// request. Null if there is none, also while the connection's own speed isn't known yet.
     /// </summary>
@@ -363,6 +400,7 @@ sealed class Engine(HttpClient http, SafeFileHandle file, long size, IEnumerable
             double seconds = (now - s.Since) / 1000.0;
             if (left <= 0 || seconds < 4) continue;
             double speed = (s.Pos - s.Start) / seconds;
+            if (now > s.EarlierTime) speed = Math.Min(speed, (s.Pos - s.EarlierPos) * 1000.0 / (now - s.EarlierTime));
             double eta = speed > 0 ? left / speed : double.PositiveInfinity;
             if (eta > longest && mine > 3 * speed) (pick, longest) = (s, eta);
         }

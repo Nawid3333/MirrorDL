@@ -39,7 +39,7 @@ sealed class FakeServer : HttpMessageHandler
         if (link.MaxConnections > 0 && Volatile.Read(ref link.Open) >= link.MaxConnections)
         {
             Interlocked.Increment(ref link.Refused); // as a host that allows only so many connections at once
-            return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { RequestMessage = request };
+            return new HttpResponseMessage(link.LimitStatus) { RequestMessage = request };
         }
 
         byte[] data = link.Content;
@@ -77,7 +77,7 @@ sealed class FakeServer : HttpMessageHandler
         if (Interlocked.Exchange(ref link.CutAfter, 0) is > 0 and long cut)
             stream = new MemoryStream(data, (int)from, (int)Math.Min(count, cut), writable: false); // Content-Length stays
         if (link.ChunkDelay > TimeSpan.Zero)
-            stream = new SlowStream(stream, link.ChunkDelay);
+            stream = new SlowStream(stream, link.ChunkDelay, link.SlowAfter);
         Interlocked.Increment(ref link.Open);
         stream = new OpenStream(stream, link);
         var content = new StreamContent(stream);
@@ -111,13 +111,16 @@ sealed class FakeServer : HttpMessageHandler
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
-    /// <summary>A body that sends at most 64 KB at a time, with a pause before each.</summary>
-    sealed class SlowStream(Stream inner, TimeSpan delay) : Stream
+    /// <summary>A body that sends at most 64 KB at a time, with a pause before each - once <paramref name="fastFor"/> bytes are sent.</summary>
+    sealed class SlowStream(Stream inner, TimeSpan delay, long fastFor) : Stream
     {
+        long _sent;
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
         {
-            await Task.Delay(delay, ct);
-            return await inner.ReadAsync(buffer[..Math.Min(buffer.Length, 64 * 1024)], ct);
+            if (_sent >= fastFor) await Task.Delay(delay, ct);
+            int read = await inner.ReadAsync(buffer[..Math.Min(buffer.Length, 64 * 1024)], ct);
+            _sent += read;
+            return read;
         }
         public override int Read(byte[] buffer, int offset, int count) =>
             ReadAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
@@ -173,8 +176,11 @@ sealed class FakeLink(byte[] content)
     public long CutAfter;
     /// <summary>The address the answers come from, as after a redirect to it; null for the link's own.</summary>
     public Uri? FinalUrl { get; set; }
-    /// <summary>How many connections may be open at once; more are answered with 503. 0 for no limit.</summary>
+    /// <summary>How many connections may be open at once; more are answered with <see cref="LimitStatus"/>. 0 for no limit.</summary>
     public int MaxConnections { get; set; }
+    public HttpStatusCode LimitStatus { get; set; } = HttpStatusCode.ServiceUnavailable;
+    /// <summary>Bytes each body sends at full speed before <see cref="ChunkDelay"/> applies (a fast start, then slow).</summary>
+    public long SlowAfter { get; set; }
     public int Open, Refused;
     /// <summary>A pause before every 64 KB of a body: makes the link slow.</summary>
     public TimeSpan ChunkDelay { get; set; }

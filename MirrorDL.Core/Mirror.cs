@@ -58,9 +58,7 @@ public sealed class Mirror(int index, Uri url)
         timeout.CancelAfter(CheckTimeout);
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, Url);
-            request.Headers.Range = new RangeHeaderValue(0, 0);
-            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+            using var response = await SendAsync(http, 0, 0, timeout.Token);
             FinalUrl = response.RequestMessage?.RequestUri;
             var headers = response.Content.Headers;
             if (response.StatusCode == HttpStatusCode.PartialContent && headers.ContentRange is { HasLength: true } range)
@@ -102,14 +100,31 @@ public sealed class Mirror(int index, Uri url)
         }
     }
 
-    /// <summary>Fetches small pieces at the given offsets and keeps their SHA-256, to compare links with each other.</summary>
+    /// <summary>
+    /// Fetches small pieces at the given offsets and keeps their SHA-256, to compare links with each other. Four at a
+    /// time: one after another, a far or slow link made the start wait (docs/speed.md). A server that refuses so many
+    /// at once gets them one at a time.
+    /// </summary>
     internal async Task SampleAsync(HttpClient http, IReadOnlyList<long> offsets, int length, CancellationToken ct)
     {
         var samples = new byte[offsets.Count][];
         try
         {
-            for (int i = 0; i < offsets.Count; i++)
-                samples[i] = await HashRangeAsync(http, offsets[i], length, ct);
+            try
+            {
+                using var gate = new SemaphoreSlim(4);
+                await Task.WhenAll(offsets.Select(async (offset, i) =>
+                {
+                    await gate.WaitAsync(ct);
+                    try { samples[i] = await HashRangeAsync(http, offset, length, ct); }
+                    finally { gate.Release(); }
+                }));
+            }
+            catch (Exception e) when (e is HttpRequestException or IOException or SourceError)
+            {
+                for (int i = 0; i < offsets.Count; i++)
+                    samples[i] ??= await HashRangeAsync(http, offsets[i], length, ct); // only those still missing
+            }
             Samples = samples;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -126,15 +141,32 @@ public sealed class Mirror(int index, Uri url)
     internal async Task<byte[]> HashRangeAsync(HttpClient http, long offset, int length, CancellationToken ct) =>
         SHA256.HashData(await ReadRangeAsync(http, offset, length, ct));
 
+    /// <summary>
+    /// Asks for a range while the link is checked. "Busy" (429, 503) is asked again three times, after 1, 2 and 4 s: a
+    /// server with a moment of trouble just then would otherwise be left out of the whole download - with one link,
+    /// the download failed (docs/speed.md).
+    /// </summary>
+    async Task<HttpResponseMessage> SendAsync(HttpClient http, long from, long to, CancellationToken ct)
+    {
+        for (int attempt = 0; ; attempt++)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, Url);
+            request.Headers.Range = new RangeHeaderValue(from, to);
+            var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+            if (attempt == 3 || response.StatusCode is not (HttpStatusCode.ServiceUnavailable or HttpStatusCode.TooManyRequests))
+                return response;
+            response.Dispose();
+            await Task.Delay(TimeSpan.FromSeconds(1 << attempt), ct);
+        }
+    }
+
     /// <summary><paramref name="length"/> bytes at <paramref name="offset"/>, as this link sends them.</summary>
     internal async Task<byte[]> ReadRangeAsync(HttpClient http, long offset, int length, CancellationToken ct)
     {
         if (length <= 0) return [];
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(CheckTimeout);
-        using var request = new HttpRequestMessage(HttpMethod.Get, Url);
-        request.Headers.Range = new RangeHeaderValue(offset, offset + length - 1);
-        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+        using var response = await SendAsync(http, offset, offset + length - 1, timeout.Token);
         if (response.StatusCode != HttpStatusCode.PartialContent)
             throw new SourceError($"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
         if (response.Content.Headers.ContentRange?.From != offset)
