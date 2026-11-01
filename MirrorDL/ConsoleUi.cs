@@ -114,6 +114,7 @@ sealed class ProgressView
     readonly bool _live = !Console.IsOutputRedirected;
     int _top = -1;
     int _count;
+    int _width;
     long _nextPlain;
     IReadOnlyList<string>? _last;
 
@@ -128,6 +129,14 @@ sealed class ProgressView
             return;
         }
         int width = Math.Max(40, WindowWidth()) - 1;
+        // A resized window wraps what is already there anew, so the block isn't where it was anymore: start a
+        // new one below instead of writing over the wrong lines.
+        if (_top >= 0 && width != _width)
+        {
+            _top = -1;
+            _count = 0;
+        }
+        _width = width;
         // A block taller than the window would scroll it, and every redraw would then land in the wrong place.
         int height = Math.Max(4, WindowHeight()) - 1;
         if (lines.Count > height) lines = [.. lines.Take(height - 1), $"  ... and {lines.Count - height + 1} more"];

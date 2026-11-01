@@ -31,9 +31,9 @@ sealed class Tuner
     readonly Dictionary<Mirror, (long Until, long Wait)> _resting = [];
     readonly HashSet<Mirror> _smallSteps = [];
     Mirror? _link; // the link trying more connections, and what it had before
-    int _before, _after;
+    int _before, _after, _remeasured;
     double _baseline, _perConnection;
-    long _startedAt;
+    long _decideAt;
 
     public Tuner(IReadOnlyList<Mirror> mirrors, int maxPerLink, int maxTotal)
     {
@@ -52,7 +52,7 @@ sealed class Tuner
 
         if (_link != null)
         {
-            if (now - _startedAt >= Settle + Window) Finish(now);
+            if (now >= _decideAt) Finish(now);
         }
         else
             TryMore(now, remaining);
@@ -99,16 +99,25 @@ sealed class Tuner
             (_before, _after) = (best.Cap, best.Cap + add);
             best.Cap = _after;
         }
-        (_link, _baseline, _perConnection, _startedAt) = (best, speed, bestPerConnection, now);
+        (_link, _baseline, _perConnection, _decideAt, _remeasured) = (best, speed, bestPerConnection, now + Settle + Window, 0);
     }
 
     void Finish(long now)
     {
         var link = _link!;
+        var measured = Speed(now, Window);
+        // A connection that came or went meanwhile - an error on another link, say - spoils the measurement:
+        // measure again rather than take it for "no faster". After three tries, give up the try.
+        if (measured == null && _remeasured < 3 && link.Cap == _after)
+        {
+            _remeasured++;
+            _decideAt = now + Window;
+            return;
+        }
         _link = null;
         int added = _after - _before;
         // How many connections' worth of speed the download gained.
-        double worth = (Speed(now, Window) - _baseline) / _perConnection ?? 0;
+        double worth = (measured - _baseline) / _perConnection ?? 0;
         lock (link)
         {
             // Cap is something else when the server refused connections meanwhile: then it stays as that left it.

@@ -17,7 +17,8 @@ name: Runner images
 # (runner-image-next-... / runner-image-latest-...) and later runs find it and stop. A
 # failing image is retried every day until it passes. A failure opens one issue per
 # image, assigned to the owner with an @mention; the first green run on that image
-# closes it. Run by hand to test both again regardless.
+# closes it, and so does -latest moving past the image. Run by hand to test both again
+# regardless.
 
 on:
   schedule:
@@ -231,3 +232,14 @@ jobs:
           fi
           report "$LATEST" "$LATEST_IMAGES" 'the image -latest now gives, so pushes fail there too until this is fixed'
           report "$NEXT" "$NEXT_IMAGES" 'the next image: -latest does not give it yet, but will (GitHub announces the date in actions/runner-images), so this is a warning before it does'
+
+          # An issue about an image that is neither -latest's nor the next one anymore - -latest moved past it -
+          # can never get the green run that would close it: it has served its purpose.
+          gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --json number,title \
+            --jq '.[] | select(.title | startswith("CI fails on runner image ")) | "\(.number)\t\(.title | ltrimstr("CI fails on runner image "))"' |
+          while IFS=$'\t' read -r number images; do
+            if [ "$images" != "$LATEST_IMAGES" ] && [ "$images" != "$NEXT_IMAGES" ]; then
+              gh issue close "$number" --repo "$GITHUB_REPOSITORY" \
+                --comment "Closed: -latest has moved past $images, so no run tests it anymore (now: $LATEST_IMAGES${NEXT_IMAGES:+, next: $NEXT_IMAGES}). $RUN_URL"
+            fi
+          done

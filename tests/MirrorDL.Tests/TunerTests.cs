@@ -19,6 +19,8 @@ public class TunerTests
         public int[]? ServerConnections;
         /// <summary>How often a server refused connections.</summary>
         public int Refusals;
+        /// <summary>At these half seconds, link 2 loses a connection for that half second (an error, say).</summary>
+        public int[] DipAt = [];
         public double Line = double.PositiveInfinity;
         /// <summary>The speeds go up or down by up to this share, at random.</summary>
         public double Noise;
@@ -50,6 +52,7 @@ public class TunerTests
                         Refusals++;
                     }
                     m.Workers = Math.Min(m.Cap, MaxTotal - total);
+                    if (i == 1 && DipAt.Contains(tick)) m.Workers = Math.Max(0, m.Workers - 1);
                     total += m.Workers;
                     Peak[i] = Math.Max(Peak[i], m.Workers);
                 }
@@ -133,6 +136,15 @@ public class TunerTests
         var net = new Network { PerConnection = [1 * MB], ServerLimit = [6 * MB] };
         var link = net.Run(400, second => { if (second == 100) net.ServerLimit = null; })[0];
         Assert.Equal(Tuner.MaxPerLink, link.Cap);
+    }
+
+    [Fact]
+    public void Measures_again_when_another_link_spoils_the_measurement()
+    {
+        // Link 1 tries 8 connections from 5 s on; at 8 s link 2 loses one for a moment, which spoils the
+        // measurement at 9.5 s. It is measured again instead of taken for "no faster" (and a 30 s rest).
+        var net = new Network { PerConnection = [1 * MB, 1 * MB], DipAt = [16] };
+        Assert.True(net.Run(20)[0].Cap >= 8, "link 1 gave up its try");
     }
 
     [Fact]
