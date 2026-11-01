@@ -107,6 +107,17 @@ in 4 at random (far more than real hosts do), a single link failed to start in 1
 since, only when all four answers were refusals: 1 run in 80, after 7 s of trying. Two tries
 (after 1 and 2 s) weren't enough there: 3 runs in 75 still failed.
 
+### Left as it is: a connection that never gets data while the link's others do
+
+A connection whose requests keep timing out (no data for 60 s) while the link's other connections
+work asks again after its pause, again and again: errors of one connection don't add up while the
+link as a whole gets data. A host that silently drops a second connection from the same address
+would keep one of the link's connections busy for nothing, asking about every 90 s. Ending such a
+connection after a few failures in a row was considered, but not done: each failure takes the full
+60 s to show, so it can't be measured in a reasonable time, and a rule made without measuring could
+cut connections on a few seconds of trouble on the line - which happens far more often. It costs
+one connection's place, not data or correctness; measure it first if it ever shows up.
+
 ## Top speed
 
 On the development PC, MirrorDL downloads 1.5 GB from two local links at about 800-860 MB/s (about
