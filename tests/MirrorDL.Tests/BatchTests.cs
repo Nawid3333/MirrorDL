@@ -245,6 +245,35 @@ public class BatchTests
     }
 
     [Fact]
+    public async Task Unfinished_Firefox_files_of_several_files_each_go_on_with_their_own_file()
+    {
+        using var d = new Download();
+        byte[] movie1 = Download.Bytes(6 << 20, 41), movie2 = Download.Bytes((5 << 20) + 77, 42);
+        // Firefox stopped two downloads: one with its random piece in the name and the empty placeholder next to it
+        // (found in the save folder by itself), one plain .part file added by the user. A third file is new.
+        File.WriteAllBytes(d.PathOf("movie.part1.rar"), []);
+        File.WriteAllBytes(d.PathOf("movie.part1.Xy12_-Ab.rar.part"), movie1[..(4 << 20)]);
+        File.WriteAllBytes(d.PathOf("movie.part2.rar.part"), movie2[..(3 << 20)]);
+        d.Link(movie1, "movie.part1.rar");
+        d.Link(movie2, "movie.part2.rar");
+        d.Link(movie1, "movie.part1.rar");
+        d.Link(C, "movie.part3.rar");
+        d.Job.PartFiles.Add(d.PathOf("movie.part2.rar.part"));
+
+        Assert.Equal(0, await d.RunBatchAsync());
+        Assert.Equal(["movie.part1.rar", "movie.part2.rar", "movie.part3.rar"], d.Files); // placeholder taken, no .part left
+        Assert.Equal(movie1, File.ReadAllBytes(d.PathOf("movie.part1.rar")));
+        Assert.Equal(movie2, File.ReadAllBytes(d.PathOf("movie.part2.rar")));
+        Assert.Equal(C, File.ReadAllBytes(d.PathOf("movie.part3.rar")));
+        // Only the rest was downloaded: Firefox's last MB, which may not have reached the disk, is fetched again.
+        Assert.Equal(movie1.Length - (3 << 20), d.Batch.Files[0].Links.Sum(m => m.Bytes));
+        Assert.Equal(movie2.Length - (2 << 20), d.Batch.Files[1].Links.Sum(m => m.Bytes));
+        Assert.Equal(C.Length, d.Batch.Files[2].Links.Sum(m => m.Bytes));
+        Assert.Contains("Found movie.part1.Xy12_-Ab.rar.part", d.Output);
+        Assert.Contains("Found movie.part2.rar.part", d.Output);
+    }
+
+    [Fact]
     public async Task An_unfinished_file_that_fits_no_file_is_left_out_and_said()
     {
         using var d = new Download();
