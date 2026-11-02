@@ -54,7 +54,9 @@ static class Ui
         {
             if (line.Trim().Length > 0)
             {
-                Input.Add(line, job, ignored);
+                // A list of links that can't be read is said; the rest pasted still counts.
+                try { Input.Add(line, job, ignored); }
+                catch (UserError e) { Error(e.Message); }
                 continue;
             }
             if (job.Urls.Count == 0)

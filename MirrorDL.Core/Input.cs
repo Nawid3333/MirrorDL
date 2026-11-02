@@ -16,6 +16,10 @@ public static class Input
     // A link among other marks: "[name](link)", "<link>", "href=\"link\"", "**link**". It ends at a space, a quote, a
     // backtick or an angle bracket.
     static readonly Regex LinkInText = new(@"https?://[^\s<>""`]+", RegexOptions.IgnoreCase);
+    // Where a second link begins right after one: "[link](link)", "link,link", "link;link".
+    static readonly Regex NextLink = new(@"(?:\]\(|[,;])(?=https?://)", RegexOptions.IgnoreCase);
+    // A picture, "![text](address)", is shown on a page, not listed for downloading.
+    static readonly Regex Picture = new(@"!\[[^\]\r\n]*\]\([^)\r\n]*\)");
     // What a page writes before a checksum instead of a file name.
     static readonly HashSet<string> NotNames = new(
         ["md5", "sha1", "sha-1", "sha256", "sha-256", "sha384", "sha-384", "sha512", "sha-512", "checksum", "hash", "sum",
@@ -34,7 +38,7 @@ public static class Input
         }
         Uri? link = null;
         var checksums = new List<string>();
-        foreach (string token in text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+        foreach (string token in WithoutPictures(text).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
         {
             string t = Unquote(token);
             var found = LinksIn(t);
@@ -66,7 +70,8 @@ public static class Input
 
     /// <summary>
     /// The http(s) links in a word of pasted text: the word itself, or links inside it as markdown and web pages write
-    /// them. Punctuation after a link (". , : ; ! ?") is the sentence's, as is a ")" or "]" the link doesn't open.
+    /// them. Punctuation after a link (". , : ; ! ?") is the sentence's, as is a ")" or "]" the link doesn't open, and
+    /// marks that close what opened before it ("**link**", "_link_", "~~link~~").
     /// </summary>
     public static List<Uri> LinksIn(string word)
     {
@@ -75,19 +80,29 @@ public static class Input
         while (at < word.Length && LinkInText.Match(word, at) is { Success: true } match)
         {
             string s = match.Value;
-            // "[link](link)": the shown text of a markdown link ends at "](".
-            int cut = s.IndexOf("](", StringComparison.Ordinal);
-            if (cut >= 0) s = s[..cut];
-            at = match.Index + (cut >= 0 ? cut : match.Length);
-            while (s.Length > 0 && (".,:;!?'*~".Contains(s[^1])
-                                    || s[^1] == ')' && s.Count(c => c == '(') < s.Count(c => c == ')')
-                                    || s[^1] == ']' && s.Count(c => c == '[') < s.Count(c => c == ']')))
+            if (NextLink.Match(s) is { Success: true } next) s = s[..next.Index];
+            at = match.Index + s.Length;
+            int open = match.Index;
+            while (open > 0 && word[open - 1] is '*' or '_' or '~') open--;
+            string marks = word[open..match.Index];
+            while (s.Length > 0)
+            {
+                char last = s[^1];
+                if (marks.Length > 0 && last == marks[^1]) marks = marks[..^1];
+                else if (!(".,:;!?'".Contains(last)
+                           || last == ')' && s.Count(c => c == '(') < s.Count(c => c == ')')
+                           || last == ']' && s.Count(c => c == '[') < s.Count(c => c == ']')))
+                    break;
                 s = s[..^1];
+            }
             if (Uri.TryCreate(s, UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
                 links.Add(uri);
         }
         return links;
     }
+
+    /// <summary>A line of text without the pictures markdown writes in it, "![text](address)": their addresses are no downloads.</summary>
+    public static string WithoutPictures(string line) => line.Contains("![") ? Picture.Replace(line, " ") : line;
 
     /// <summary>A checksum and the name of its file, written on one line; null if the line isn't one.</summary>
     public static FileChecksum? NamedChecksum(string line)
@@ -126,7 +141,7 @@ public static class Input
             // A .txt or .md file holds links; any other file is an unfinished download of this file, whatever its
             // name - it is compared with the links before anything of it is used.
             if (LinkFiles.Is(path))
-                AddList(path, job);
+                AddList(path, job, ignored);
             else if (!job.PartFiles.Contains(path, StringComparer.OrdinalIgnoreCase))
                 job.PartFiles.Add(path);
             return true;
@@ -137,8 +152,11 @@ public static class Input
         }
     }
 
-    /// <summary>The links and checksums of a list of links; the words around them are its notes, not mistakes to show.</summary>
-    static void AddList(string path, Job job)
+    /// <summary>
+    /// The links and checksums of a list of links. The words around them are its notes, not mistakes to show; a link
+    /// MirrorDL can't download (ftp://) is shown.
+    /// </summary>
+    static void AddList(string path, Job job, List<string> ignored)
     {
         string text;
         try
@@ -149,7 +167,9 @@ public static class Input
         {
             throw new UserError($"Can't read the links in {path}: {e.Message}");
         }
-        foreach (string line in text.Split('\r', '\n')) Add(line, job, [], allowFiles: false);
+        var words = new List<string>();
+        foreach (string line in text.Split('\r', '\n')) Add(line, job, words, allowFiles: false);
+        ignored.AddRange(words.Where(w => w.Contains("://")));
     }
 
     static string Unquote(string s) =>

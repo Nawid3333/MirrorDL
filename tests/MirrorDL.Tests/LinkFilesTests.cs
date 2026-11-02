@@ -24,14 +24,40 @@ public class LinkFilesTests
     [InlineData("https://a.example/get?files[]=1", "https://a.example/get?files[]=1")]
     [InlineData("http://[::1]:8080/file.iso", "http://[::1]:8080/file.iso")]
     [InlineData("HTTPS://A.example/file.iso", "HTTPS://A.example/file.iso")]
+    [InlineData("_https://a.example/file.iso_", "https://a.example/file.iso")]
+    [InlineData("~~https://a.example/file.iso~~", "https://a.example/file.iso")]
+    [InlineData("**https://a.example/file.iso**.", "https://a.example/file.iso")]
+    // Marks that nothing opened before the link are part of it.
+    [InlineData("https://a.example/Game[EU](v2).iso", "https://a.example/Game[EU](v2).iso")]
+    [InlineData("https://a.example/releases/*", "https://a.example/releases/*")]
+    [InlineData("https://a.example/file~", "https://a.example/file~")]
+    [InlineData("https://a.example/my_file_", "https://a.example/my_file_")]
     public void LinksIn_finds_the_link_inside_the_marks_around_it(string word, string expected) =>
         Assert.Equal([new Uri(expected)], Input.LinksIn(word));
 
-    [Fact]
-    public void LinksIn_finds_both_links_of_a_markdown_link_whose_text_is_a_link()
+    [Theory]
+    [InlineData("[https://a.example/x.iso](https://b.example/x.iso)")] // a markdown link whose text is a link
+    [InlineData("https://a.example/x.iso,https://b.example/x.iso")]
+    [InlineData("https://a.example/x.iso;https://b.example/x.iso")]
+    public void LinksIn_finds_both_of_two_links_written_together(string word)
     {
-        Assert.Equal([new Uri("https://a.example/x.iso"), new Uri("https://b.example/x.iso")],
-            Input.LinksIn("[https://a.example/x.iso](https://b.example/x.iso)"));
+        Assert.Equal([new Uri("https://a.example/x.iso"), new Uri("https://b.example/x.iso")], Input.LinksIn(word));
+    }
+
+    [Fact]
+    public void A_pasted_picture_is_no_link_and_gets_no_checksum()
+    {
+        var job = new Job();
+        Input.Add($"[![build status](https://img.example/badge.svg)](https://a.example/game.iso) {Hex1}", job, []);
+        Assert.Equal([new Uri("https://a.example/game.iso")], job.Urls);
+        Assert.Equal([new FileChecksum(Hex1, Link: new Uri("https://a.example/game.iso"))], job.FileChecksums);
+    }
+
+    [Fact]
+    public void Markdown_takes_out_its_marks_but_keeps_those_written_as_themselves()
+    {
+        string plain = LinkFiles.Markdown("> 1. **bold** `code` | a\\|b | \\*star\\* my\\_file.iso");
+        Assert.Equal(["bold", "code", "a|b", "*star*", "my_file.iso"], plain.Split(' ', StringSplitOptions.RemoveEmptyEntries));
     }
 
     [Theory]
@@ -112,18 +138,48 @@ public class LinkFilesTests
     public void Only_txt_and_md_files_are_lists_when_given(string name, bool isList)
     {
         using var folder = new TempFolder();
-        Assert.Equal(isList, LinkFiles.Is(folder.File(name)));
+        string path = Path.Combine(folder.Path, name);
+        File.WriteAllText(path, "https://a.example/x.iso");
+        var job = new Job();
+
+        Input.Add(path, job, []);
+
+        Assert.Equal(isList ? new[] { new Uri("https://a.example/x.iso") } : [], job.Urls);
+        Assert.Equal(isList ? [] : new[] { path }, job.PartFiles);
     }
 
     [Theory]
-    [InlineData(".aria2")]
-    [InlineData(".mirrordl")]
-    public void A_txt_file_being_downloaded_is_an_unfinished_download_not_a_list(string progress)
+    [InlineData("notes.txt", ".aria2")]
+    [InlineData("notes.txt", ".mirrordl")]
+    [InlineData("notes.md", ".aria2")]
+    [InlineData("notes.md", ".mirrordl")]
+    public void A_txt_or_md_file_being_downloaded_is_an_unfinished_download_not_a_list(string name, string progress)
     {
         using var folder = new TempFolder();
-        string download = folder.File("notes.txt", 100);
-        folder.File("notes.txt" + progress, 10);
-        Assert.False(LinkFiles.Is(download));
+        string download = Path.Combine(folder.Path, name);
+        File.WriteAllText(download, "https://a.example/x.iso");
+        folder.File(name + progress, 10);
+        var job = new Job();
+
+        Input.Add(download, job, []);
+
+        Assert.Empty(job.Urls);
+        Assert.Equal([download], job.PartFiles);
+    }
+
+    [Fact]
+    public void A_link_MirrorDL_can_t_download_is_said_from_a_list_but_its_words_are_not()
+    {
+        using var folder = new TempFolder();
+        string list = Path.Combine(folder.Path, "links.txt");
+        File.WriteAllText(list, "Mirror 1: https://a.example/x.iso\nMirror 2: ftp://b.example/x.iso\n");
+        var job = new Job();
+        var ignored = new List<string>();
+
+        Input.Add(list, job, ignored);
+
+        Assert.Equal([new Uri("https://a.example/x.iso")], job.Urls);
+        Assert.Equal(["ftp://b.example/x.iso"], ignored);
     }
 
     [Fact]

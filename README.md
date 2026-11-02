@@ -93,9 +93,10 @@ to; tick the ones you want and press **Download**.
 - Every link, checksum and unfinished file has a box of its own. Paste a whole list into any box,
   or drop it on the window: each line goes into a box of its own, in the list it belongs to, and
   next to each box MirrorDL says what it made of it.
-- Links kept in a file: drop a `.txt` or `.md` file on the window, or press **From a file…** next
-  to Links (that one reads any text file). MirrorDL takes the links and checksums written in it -
-  also markdown's `[name](link)`, lists and tables - and leaves the words around them.
+- Links kept in a file: drop a `.txt` or `.md` (`.markdown`) file on the window, or press **From a
+  file…** next to Links (that one reads any text file up to 4 MB). MirrorDL takes the links and
+  checksums written in it - also markdown's `[name](link)`, lists and tables - and leaves the words,
+  pictures and paths around them.
 - The files of one check download one after another, each with all of the internet line, so the
   first ones are done soonest. Check more links while they run: those start next to them.
 - Each download has its buttons: pause, resume, show in folder, take off the list. Click one to

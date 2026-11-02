@@ -18,10 +18,10 @@ public static class LinkFiles
     /// <summary>The biggest file read as a list: tens of thousands of links. A bigger one is something else.</summary>
     public const int MaxBytes = 4 << 20;
 
-    // A picture, "![text](address)", is shown on the page, not listed for downloading.
-    static readonly Regex Picture = new(@"!\[[^\]\r\n]*\]\([^)\r\n]*\)");
     // Before the text of a line: quote marks, a heading's #, a list item's mark and its task box.
     static readonly Regex LineMarks = new(@"^\s*(?:>\s*)*(?:#{1,6}\s+|(?:[-*+]|\d{1,9}[.)])\s+(?:\[[ xX]\]\s+)?)?");
+    // Code marks, table bars, bold or italic stars - unless written as themselves: "\*", "\|".
+    static readonly Regex Marks = new(@"(?<!\\)[`|*]");
     // "\_" stands for "_": markdown's way of writing a mark as itself.
     static readonly Regex Escape = new(@"\\(?=[!-/:-@\[-`{-~])");
 
@@ -38,9 +38,13 @@ public static class LinkFiles
     {
         // Shared: a list open in an editor can still be read.
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-        if (stream.Length > MaxBytes)
-            throw new InvalidDataException($"The file is bigger than {MaxBytes >> 20} MB: too big for a list of links.");
-        string text = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true).ReadToEnd();
+        var tooBig = new InvalidDataException($"The file is bigger than {MaxBytes >> 20} MB: too big for a list of links.");
+        if (stream.Length > MaxBytes) throw tooBig;
+        // At most one byte more than a list may have: a file that grows while it is read isn't read on and on.
+        var bytes = new byte[MaxBytes + 1];
+        int length = stream.ReadAtLeast(bytes, bytes.Length, throwOnEndOfStream: false);
+        if (length > MaxBytes) throw tooBig;
+        string text = new StreamReader(new MemoryStream(bytes, 0, length), Encoding.UTF8, detectEncodingFromByteOrderMarks: true).ReadToEnd();
         if (text.Contains('\0')) throw new InvalidDataException("The file isn't text.");
         return path.EndsWith(".md", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".markdown", StringComparison.OrdinalIgnoreCase)
             ? Markdown(text)
@@ -48,18 +52,15 @@ public static class LinkFiles
     }
 
     /// <summary>
-    /// Markdown as plain lines: without pictures, the marks before a line's text, escapes, code marks, table bars and
-    /// bold or italic stars - so that "- `&lt;checksum&gt;` file.iso" and "| file.iso | link |" read like pasted lines.
+    /// Markdown as plain lines: without pictures, the marks before a line's text, code marks, table bars, bold or italic
+    /// stars and escapes - so that "- `&lt;checksum&gt;` file.iso" and "| file.iso | link |" read like pasted lines.
     /// Links written "[name](link)" or "&lt;link&gt;" stay: <see cref="Input.LinksIn"/> finds them.
     /// </summary>
     internal static string Markdown(string text)
     {
-        var lines = Picture.Replace(text, " ").Split('\n');
+        var lines = Input.WithoutPictures(text).Split('\n');
         for (int i = 0; i < lines.Length; i++)
-        {
-            string line = Escape.Replace(LineMarks.Replace(lines[i], ""), "");
-            lines[i] = line.Replace('`', ' ').Replace('|', ' ').Replace('*', ' ');
-        }
+            lines[i] = Escape.Replace(Marks.Replace(LineMarks.Replace(lines[i], ""), " "), "");
         return string.Join('\n', lines);
     }
 }

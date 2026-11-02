@@ -126,6 +126,9 @@ public sealed partial class MainWindow
         return null;
     }
 
+    /// <summary>The most boxes one paste, drop or list fills: thousands of boxes would keep the window busy for minutes.</summary>
+    const int MostEntries = 1000;
+
     /// <summary>
     /// Sorts pasted or dropped text into the boxes: links, checksums (a checksum on the line of a link stays with it),
     /// unfinished files, a folder to save in. A .txt or .md file named in it gives the links and checksums written in
@@ -134,19 +137,28 @@ public sealed partial class MainWindow
     void Distribute(string text, bool lists = false)
     {
         int links = 0, checksums = 0, files = 0;
+        bool full = false;                                              // MostEntries reached: the rest is left out
         var ignored = new List<string>();
-        var read = new List<string>();                                  // the lists of links read
-        var unreadable = new List<string>();                            // and why others couldn't be
+        var read = new List<string>();                                  // the lists that gave something new
+        var nothingNew = new List<string>();                            // the lists that didn't
+        var unreadable = new List<string>();                            // and why others couldn't be read
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        bool Add(EntryKind kind, string entry)
+        {
+            if (links + checksums + files < MostEntries) return AddEntry(kind, entry);
+            full = true;
+            return false;
+        }
         void Use(string raw, bool inList)
         {
-            foreach (string full in raw.Split('\r', '\n'))
+            foreach (string whole in raw.Split('\r', '\n'))
             {
-                string line = full.Trim().Trim('"');
+                if (full) return;
+                string line = whole.Trim().Trim('"');
                 if (line.Length == 0) continue;
                 if (Input.NamedChecksum(line) != null)
                 {
-                    if (AddEntry(EntryKind.Checksum, line)) checksums++;
+                    if (Add(EntryKind.Checksum, line)) checksums++;
                     continue;
                 }
                 // A list gives links and checksums only: a folder or file named in it is a note, not something to use.
@@ -158,33 +170,35 @@ public sealed partial class MainWindow
                 if (!inList && IsFile(line))
                 {
                     if (lists || LinkFiles.Is(line)) ReadList(Path.GetFullPath(line));
-                    else if (AddEntry(EntryKind.Unfinished, Path.GetFullPath(line))) files++;
+                    else if (Add(EntryKind.Unfinished, Path.GetFullPath(line))) files++;
                     continue;
                 }
                 Uri? link = null;
                 var sums = new List<string>();
-                foreach (string token in line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+                foreach (string token in Input.WithoutPictures(line).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
                 {
                     var found = Input.LinksIn(token);
                     foreach (var uri in found)
-                        if (AddEntry(EntryKind.Link, uri.OriginalString)) links++;
+                        if (Add(EntryKind.Link, uri.OriginalString)) links++;
                     link ??= found.FirstOrDefault();
                     if (found.Count > 0) continue;
                     string t = token.Trim('"', '\'', '<', '>', '(', ')', ',', ';');
                     if (Checksum.TryParse(t, out string? hex)) sums.Add(hex);
-                    else if (!inList) ignored.Add(t); // the words around the links of a list are its notes
+                    // The words around the links of a list are its notes; a link MirrorDL can't download (ftp://) is said.
+                    else if (!inList || t.Contains("://")) ignored.Add(t);
                 }
                 foreach (string hex in sums)
-                    if (AddEntry(EntryKind.Checksum, link != null ? $"{hex}  {link}" : hex)) checksums++;
+                    if (Add(EntryKind.Checksum, link != null ? $"{hex}  {link}" : hex)) checksums++;
             }
         }
         void ReadList(string path)
         {
-            if (!seen.Add(path)) return;
+            if (full || !seen.Add(path)) return;
             try
             {
+                int before = links + checksums;
                 Use(LinkFiles.Read(path), inList: true);
-                read.Add(Path.GetFileName(path));
+                (links + checksums > before ? read : nothingNew).Add(Path.GetFileName(path));
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException)
             {
@@ -198,13 +212,15 @@ public sealed partial class MainWindow
         if (checksums > 0) added.Add(Format.Plural(checksums, "checksum"));
         if (files > 0) added.Add(Format.Plural(files, "unfinished file"));
         var notes = new List<string>();
-        if (read.Count > 0) notes.Add((added.Count > 0 ? "Read from " : "No new links or checksums in ") + string.Join(", ", read) + ".");
+        if (read.Count > 0) notes.Add("Read from " + string.Join(", ", read) + ".");
+        if (nothingNew.Count > 0) notes.Add("No new links or checksums in " + string.Join(", ", nothingNew) + ".");
+        if (full) notes.Add($"MirrorDL takes up to {MostEntries} at a time, so the rest was left out: split the list.");
         if (unreadable.Count > 0) notes.Add("Couldn't read " + string.Join(" ", unreadable));
         if (ignored.Count > 0)
             notes.Add("Not a link, checksum or file, so left out: " + string.Join(", ", ignored.Take(5).Select(s => Format.Clip(s, 30))) +
                       (ignored.Count > 5 ? $" and {ignored.Count - 5} more" : ""));
         if (added.Count > 0 || notes.Count > 0)
-            ShowNotice(unreadable.Count > 0 ? InfoBarSeverity.Warning : InfoBarSeverity.Informational,
+            ShowNotice(unreadable.Count > 0 || full ? InfoBarSeverity.Warning : InfoBarSeverity.Informational,
                 added.Count > 0 ? "Added " + string.Join(", ", added) : "Nothing to add", notes.Count > 0 ? string.Join(" ", notes) : null);
     }
 
