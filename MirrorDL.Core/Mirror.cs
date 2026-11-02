@@ -13,15 +13,22 @@ public sealed class Mirror(int index, Uri url)
     public const int SampleLength = 64 * 1024;
     static readonly TimeSpan CheckTimeout = TimeSpan.FromSeconds(30);
 
-    public int Index { get; } = index;
+    /// <summary>Its number, from 1, as pasted; links found on a pasted page come after them.</summary>
+    public int Index { get; internal set; } = index;
     public Uri Url { get; } = url;
     public Uri? FinalUrl { get; private set; }
+    /// <summary>The web page it was found on, if it wasn't pasted itself.</summary>
+    public Uri? FoundOn { get; internal set; }
+    /// <summary>The server answered with a web page, not a file (also when it refused).</summary>
+    public bool IsPage { get; private set; }
     /// <summary>The server, and where it redirects to if that's another one.</summary>
     public string Server => FinalUrl == null || FinalUrl.Authority == Url.Authority
         ? Url.Authority
         : $"{Url.Authority} → {FinalUrl.Authority}";
     public string Label => $"#{Index} {Server}";
 
+    /// <summary>Whether <see cref="InspectAsync"/> ran: size, name and <see cref="Problem"/> are known.</summary>
+    public bool Inspected { get; private set; }
     public long? Size { get; private set; }
     public bool SupportsRanges { get; private set; }
     public string? FileName { get; private set; }
@@ -29,6 +36,8 @@ public sealed class Mirror(int index, Uri url)
     public string? Note { get; private set; }
     public byte[][]? Samples { get; private set; }
     public string Fingerprint => Samples == null ? "" : string.Join("|", Samples.Select(Convert.ToHexString));
+    // Pieces compared before, by offset and length: comparing the same piece again asks the server nothing.
+    readonly Dictionary<(long Offset, int Length), byte[]> _hashes = [];
 
     /// <summary>Why this link isn't used; null while it is.</summary>
     public volatile string? Problem;
@@ -61,6 +70,7 @@ public sealed class Mirror(int index, Uri url)
             using var response = await SendAsync(http, 0, 0, timeout.Token);
             FinalUrl = response.RequestMessage?.RequestUri;
             var headers = response.Content.Headers;
+            IsPage = headers.ContentType?.MediaType is "text/html" or "application/xhtml+xml";
             if (response.StatusCode == HttpStatusCode.PartialContent && headers.ContentRange is { HasLength: true } range)
             {
                 Size = range.Length;
@@ -87,7 +97,7 @@ public sealed class Mirror(int index, Uri url)
             NameFromHeader = !string.IsNullOrWhiteSpace(name);
             if (!NameFromHeader) name = Uri.UnescapeDataString((FinalUrl ?? Url).Segments[^1]);
             FileName = CleanFileName(name!);
-            if (headers.ContentType?.MediaType == "text/html")
+            if (IsPage)
                 Note = "looks like a web page, not a file";
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -98,16 +108,43 @@ public sealed class Mirror(int index, Uri url)
         {
             Problem = Format.Short(e);
         }
+        finally
+        {
+            Inspected = !ct.IsCancellationRequested;
+        }
     }
+
+    /// <summary>
+    /// Inspects the links, at most two at a time per server: a host that allows only a few connections would answer
+    /// "busy" to a dozen links of its own at once.
+    /// </summary>
+    internal static Task InspectAllAsync(HttpClient http, IEnumerable<Mirror> mirrors, CancellationToken ct) =>
+        PerHostAsync(mirrors, 2, m => m.InspectAsync(http, ct));
+
+    /// <summary>Runs <paramref name="action"/> for every link, at most <paramref name="perHost"/> at a time per server.</summary>
+    internal static Task PerHostAsync(IEnumerable<Mirror> mirrors, int perHost, Func<Mirror, Task> action) =>
+        Task.WhenAll(mirrors.GroupBy(m => $"{m.Url.IdnHost}:{m.Url.Port}", StringComparer.OrdinalIgnoreCase).Select(async host =>
+        {
+            using var gate = new SemaphoreSlim(perHost);
+            await Task.WhenAll(host.Select(async m =>
+            {
+                await gate.WaitAsync();
+                try { await action(m); }
+                finally { gate.Release(); }
+            }));
+        }));
 
     /// <summary>
     /// Fetches small pieces at the given offsets and keeps their SHA-256, to compare links with each other. Four at a
     /// time: one after another, a far or slow link made the start wait (docs/speed.md). A server that refuses so many
-    /// at once gets them one at a time.
+    /// at once gets them one at a time. Pieces compared before are not fetched again.
     /// </summary>
     internal async Task SampleAsync(HttpClient http, IReadOnlyList<long> offsets, int length, CancellationToken ct)
     {
         var samples = new byte[offsets.Count][];
+        lock (_hashes)
+            for (int i = 0; i < offsets.Count; i++)
+                samples[i] = _hashes.GetValueOrDefault((offsets[i], length))!;
         try
         {
             try
@@ -115,6 +152,7 @@ public sealed class Mirror(int index, Uri url)
                 using var gate = new SemaphoreSlim(4);
                 await Task.WhenAll(offsets.Select(async (offset, i) =>
                 {
+                    if (samples[i] != null) return;
                     await gate.WaitAsync(ct);
                     try { samples[i] = await HashRangeAsync(http, offset, length, ct); }
                     finally { gate.Release(); }
@@ -125,6 +163,9 @@ public sealed class Mirror(int index, Uri url)
                 for (int i = 0; i < offsets.Count; i++)
                     samples[i] ??= await HashRangeAsync(http, offsets[i], length, ct); // only those still missing
             }
+            lock (_hashes)
+                for (int i = 0; i < offsets.Count; i++)
+                    _hashes[(offsets[i], length)] = samples[i];
             Samples = samples;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)

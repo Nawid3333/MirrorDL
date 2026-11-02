@@ -44,9 +44,10 @@ static class Ui
     {
         foreach (string part in job.PartFiles)
             Console.WriteLine($"Continuing: {part}");
-        Console.WriteLine("Paste the download links for one file (one per line), then press Enter on an empty line.");
-        Dim("You can also paste a checksum (MD5/SHA-1/SHA-256/SHA-384/SHA-512), drag in unfinished downloads of the file");
-        Dim("(from mirrordl, Firefox, aria2, any name) to continue them, or drag in a folder to save the file there.");
+        Console.WriteLine("Paste the download links (one per line), then press Enter on an empty line.");
+        Dim("Links to the same file are used together; links to other files are downloaded one after another.");
+        Dim("You can also paste checksums (MD5/SHA-1/SHA-256/SHA-384/SHA-512, also as \"<checksum>  <file name>\"), drag");
+        Dim("in unfinished downloads (from mirrordl, Firefox, aria2, any name) to continue them, or a folder to save in.");
         Console.WriteLine();
         while (Console.ReadLine() is { } line)
         {
@@ -77,6 +78,68 @@ static class Ui
             else Line("OK", ConsoleColor.Green);
         }
         Console.WriteLine();
+    }
+
+    /// <summary>The files the links lead to, each with its links.</summary>
+    public static void PrintFiles(IReadOnlyList<BatchFile> files)
+    {
+        Console.WriteLine();
+        foreach (var f in files)
+        {
+            string links = string.Join(" ", f.Links.Select(m => $"#{m.Index}"));
+            string size = f.Size is long s ? Format.Bytes(s) : "";
+            Console.Write($"  {f.Number,3}  {Format.Clip(f.Name, 44),-44} {size,10}  ");
+            if (f.Links.All(m => !m.Usable)) Line($"{links}  no link works", ConsoleColor.Yellow);
+            else Dim(links);
+        }
+    }
+
+    /// <summary>A line above the messages of a file.</summary>
+    public static void FileHeader(BatchFile file, int count)
+    {
+        string title = $"── File {file.Number} of {count}: {Format.Clip(file.Name, 56)} ";
+        Console.WriteLine();
+        Line(title + new string('─', Math.Max(3, 76 - title.Length)), ConsoleColor.Cyan);
+    }
+
+    /// <summary>
+    /// How far all files are: done ones in full, the one being downloaded as far as it got, the others as far as they
+    /// got before (paused or failed). A percent and the time left only when every size is known.
+    /// </summary>
+    public static string BatchLine(IReadOnlyList<BatchFile> files, BatchFile current, Status status)
+    {
+        long done = files.Sum(f => f == current ? status.Have : f.IsFinished ? f.Size ?? 0 : f.Have ?? 0);
+        int finished = files.Count(f => f.IsFinished);
+        string all = Format.Bytes(done);
+        if (files.All(f => f.Size != null) && files.Sum(f => f.Size!.Value) is long total and > 0)
+        {
+            all = $"{Format.Percent(Math.Min(100, done * 100.0 / total))} - {Format.Bytes(done)} of {Format.Bytes(total)}";
+            if (status.Speed > 0 && total > done) all += $" - about {Format.Duration((total - done) / status.Speed)} left";
+        }
+        return $"File {current.Number} of {files.Count} ({finished} done)   all: {all}";
+    }
+
+    /// <summary>How each file went.</summary>
+    public static void PrintSummary(IReadOnlyList<BatchFile> files)
+    {
+        Console.WriteLine();
+        foreach (var f in files.Where(f => f.State != FileState.Removed))
+        {
+            var (mark, color, text) = f.State switch
+            {
+                // Checksums were pasted for several files and this one matched none: maybe damaged, maybe not its own.
+                FileState.Done when f.Job.ChecksumsOfSeveral && f.ChecksumMatched == null =>
+                    ("??", ConsoleColor.Yellow, "saved, but it matches none of the checksums: " + f.SavedPath),
+                FileState.Done => ("ok", ConsoleColor.Green, f.SavedPath ?? ""),
+                FileState.Checked => ("ok", ConsoleColor.Green, "there already: " + f.SavedPath),
+                FileState.Mismatch => ("!!", ConsoleColor.Yellow, "doesn't match: " + f.SavedPath),
+                FileState.Paused => ("..", ConsoleColor.Yellow, f.Have is > 0 and long have ? $"paused at {Format.Bytes(have)}" : "paused"),
+                FileState.Failed => ("xx", ConsoleColor.Red, f.Message ?? "failed"),
+                _ => ("..", ConsoleColor.DarkGray, "not started"),
+            };
+            Console.Write($"  {mark} {f.Number,3}  {Format.Clip(f.Name, 40),-40}  ");
+            Line(text, color);
+        }
     }
 
     /// <summary>The progress block: totals like curl and aria2 show them, then one line per link.</summary>

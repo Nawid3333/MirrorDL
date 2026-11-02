@@ -66,20 +66,30 @@ static class Program
         if (job.Urls.Count == 0)
             throw new UserError("No download links given.");
 
-        var session = new Session(job) { ConfirmAsync = question => Task.FromResult(Ui.Confirm(question)) };
+        var batch = new Batch(job) { ConfirmAsync = (_, question) => Task.FromResult(Ui.Confirm(question)) };
         var gate = new object(); // one writer to the console at a time
         ProgressView? view = null;
         Phase viewPhase = Phase.Starting;
+        BatchFile? shown = null; // the file being downloaded
+
+        List<string> Lines()
+        {
+            var status = shown!.Session!.GetStatus();
+            var lines = Ui.StatusLines(status, viewPhase, shown.Job);
+            var files = batch.Files.Where(f => f.State != FileState.Removed).ToList();
+            if (files.Count > 1) lines.Insert(0, Ui.BatchLine(files, shown, status));
+            return lines;
+        }
 
         void EndView()
         {
             if (view == null) return;
-            view.Draw(Ui.StatusLines(session.GetStatus(), viewPhase, session.Job));
+            view.Draw(Lines());
             view.End();
             view = null;
         }
 
-        session.Log += (text, kind) =>
+        batch.Log += (_, text, kind) =>
         {
             lock (gate)
             {
@@ -91,8 +101,18 @@ static class Program
                 if (live) view = new ProgressView();
             }
         };
-        session.LinksChecked += () => { lock (gate) Ui.PrintLinks(session.Mirrors); };
-        session.PhaseChanged += phase =>
+        batch.Sorted += () => { lock (gate) if (batch.Files.Count > 1) Ui.PrintFiles(batch.Files); };
+        batch.FileStarted += file =>
+        {
+            lock (gate)
+            {
+                EndView();
+                shown = file;
+                if (batch.Files.Count > 1) Ui.FileHeader(file, batch.Files.Count);
+            }
+        };
+        batch.LinksChecked += file => { lock (gate) Ui.PrintLinks(file.Links); };
+        batch.PhaseChanged += (_, phase) =>
         {
             lock (gate)
             {
@@ -117,11 +137,13 @@ static class Program
         try
         {
             Console.WriteLine();
-            var run = session.RunAsync(cts.Token);
+            var run = batch.RunAsync(cts.Token);
             while (await Task.WhenAny(run, Task.Delay(500)) != run)
-                lock (gate) view?.Draw(Ui.StatusLines(session.GetStatus(), viewPhase, session.Job));
+                lock (gate) view?.Draw(Lines());
             lock (gate) EndView();
-            return await run;
+            int code = await run;
+            if (batch.Files.Count > 1) Ui.PrintSummary(batch.Files);
+            return code;
         }
         finally
         {
@@ -130,13 +152,13 @@ static class Program
     }
 
     const string Help = """
-        mirrordl {version} - download one file from several links at once
+        mirrordl {version} - download files from several links at once
 
         Usage:
           mirrordl                       asks you to paste the links
           mirrordl [options] <input>...  inputs: links, unfinished files to continue (any name), a .txt
                                          file with links, a checksum (MD5/SHA-1/SHA-256/SHA-384/SHA-512),
-                                         a folder
+                                         also with its file name ("<checksum>  <name>"), a folder
 
         Options:
           -o, --out <folder>         save here (default: Downloads, or next to the unfinished file given)
@@ -144,13 +166,25 @@ static class Program
           -m, --max-per-server <n>   at most n connections per link, 1 to 64 (default: 16)
           --delete-leftovers         delete leftovers that can't go to the Recycle Bin for good,
                                      without asking (they are asked about otherwise)
+          --one-file                 all links are mirrors of one file: don't sort them into files
+          --no-pages                 don't look for links to files on pasted web pages
 
         mirrordl finds the number of connections by itself: it adds more as long as they make the
         download faster, and stops where a server or the internet line is the limit.
 
-        All links must lead to the same file: mirrordl compares their size and a few pieces of
-        content and skips links that differ. It continues unfinished downloads of mirrordl,
-        Firefox (.part) and aria2 (.aria2); with several of the same file, it checks each one and
-        puts together what they hold. Ctrl+C pauses; run it again to continue.
+        Links to the same file - the same name, or the same size and content - are its mirrors and
+        are used together; links to other files are downloaded one after another. A checksum goes
+        with the file named on its line or the link on its line; others are matched by computing.
+        Of the mirrors of a file, links with another size or content are skipped. A link to a web
+        page (a file host's page with a download button) is read for links to files on it; one
+        that only appears after a captcha can't be seen - open the page in a browser for it.
+
+        It continues unfinished downloads of mirrordl, Firefox (.part) and aria2 (.aria2); with
+        several of the same file, it checks each one and puts together what they hold. A file that
+        is in the save folder already, complete, is only checked, not downloaded again. Ctrl+C
+        pauses; run the same command again to continue.
+
+        Exit codes: 0 all done, 1 a file failed, 2 a file doesn't match its checksum or links,
+        130 paused.
         """;
 }

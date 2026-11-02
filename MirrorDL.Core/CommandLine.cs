@@ -36,6 +36,12 @@ public static class CommandLine
                 case "--delete-leftovers":
                     job.DeleteLeftovers = true;
                     break;
+                case "--one-file":
+                    job.OneFile = true;
+                    break;
+                case "--no-pages":
+                    job.LookIntoPages = false;
+                    break;
                 default:
                     // A mistyped option would otherwise be ignored, and the value after it taken for an input.
                     if (args[i].Length > 1 && args[i][0] == '-' && !File.Exists(args[i]) && !Directory.Exists(args[i]))

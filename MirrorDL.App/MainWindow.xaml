@@ -6,10 +6,7 @@
     xmlns:local="using:MirrorDL.App"
     Title="MirrorDL">
 
-    <Window.SystemBackdrop>
-        <MicaBackdrop />
-    </Window.SystemBackdrop>
-
+    <!-- The backdrop (Mica, or none for OLED black) is set in MainWindow.Theme.cs. -->
     <Grid x:Name="Root" AllowDrop="True" DragOver="Root_DragOver" Drop="Root_Drop">
         <Grid.Resources>
             <Style x:Key="Card" TargetType="Border">
@@ -22,10 +19,34 @@
             <Style x:Key="Label" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
                 <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
             </Style>
+            <Style x:Key="Help" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Setter Property="TextWrapping" Value="Wrap" />
+            </Style>
             <Style x:Key="Value" TargetType="TextBlock" BasedOn="{StaticResource BodyStrongTextBlockStyle}">
                 <Setter Property="Text" Value="–" />
                 <Setter Property="TextTrimming" Value="CharacterEllipsis" />
             </Style>
+            <Style x:Key="Section" TargetType="TextBlock" BasedOn="{StaticResource BodyStrongTextBlockStyle}">
+                <Setter Property="Margin" Value="0,4,0,0" />
+            </Style>
+            <Style x:Key="IconButton" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                <Setter Property="Padding" Value="8,5" />
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderBrush" Value="Transparent" />
+            </Style>
+            <!-- A setting: what it is and does on the left, the switch on the right. -->
+            <Style x:Key="SettingCard" TargetType="Grid">
+                <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="6" />
+                <Setter Property="Padding" Value="16,12" />
+                <Setter Property="ColumnSpacing" Value="16" />
+            </Style>
+
+
         </Grid.Resources>
         <Grid.RowDefinitions>
             <RowDefinition Height="48" />
@@ -37,192 +58,408 @@
                 <Image x:Name="TitleBarIcon" Width="18" Height="18" />
                 <TextBlock Text="MirrorDL" Style="{StaticResource BodyStrongTextBlockStyle}" />
                 <TextBlock x:Name="VersionText" Style="{StaticResource Label}" VerticalAlignment="Center" />
-                <TextBlock Text="one file, many links, all at once" Style="{StaticResource Label}" VerticalAlignment="Center" />
+                <TextBlock Text="files from many links, all at once" Style="{StaticResource Label}" VerticalAlignment="Center" />
             </StackPanel>
         </Grid>
 
-        <ScrollViewer Grid.Row="1">
-            <StackPanel Padding="20,0,20,20" Spacing="12">
+        <NavigationView x:Name="Nav" Grid.Row="1" PaneDisplayMode="Top" IsBackButtonVisible="Collapsed"
+                        IsSettingsVisible="True" SelectionChanged="Nav_SelectionChanged">
+            <NavigationView.MenuItems>
+                <NavigationViewItem x:Name="DownloadsItem" Content="Downloads" Tag="downloads" IsSelected="True">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE896;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem x:Name="HistoryItem" Content="History" Tag="history">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE81C;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+            </NavigationView.MenuItems>
 
-                <!-- Only in the GitHub version: the Store updates the Store version itself. -->
-                <InfoBar x:Name="UpdateBar" IsOpen="False" Severity="Informational" Title="A new version is available">
-                    <InfoBar.ActionButton>
-                        <Button Content="Download" Click="DownloadUpdate_Click" />
-                    </InfoBar.ActionButton>
-                </InfoBar>
+            <Grid>
+                <!-- ===================== Downloads ===================== -->
+                <ScrollViewer x:Name="DownloadsPage">
+                    <StackPanel Padding="20,12,20,20" Spacing="12">
 
-                <!-- What to download -->
-                <Border Style="{StaticResource Card}">
-                    <Grid ColumnSpacing="8" RowSpacing="8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-
-                        <TextBox x:Name="LinksBox" Grid.ColumnSpan="3" Height="150"
-                                 AcceptsReturn="True" TextWrapping="NoWrap" IsSpellCheckEnabled="False"
-                                 FontFamily="Cascadia Mono, Consolas"
-                                 ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Auto"
-                                 PlaceholderText="https://…&#x0a;https://…&#x0a;A checksum (MD5, SHA-1, SHA-256, SHA-384, SHA-512) can go here too.">
-                            <TextBox.Header>
-                                <TextBlock Text="Links to the same file, one per line (you can also drop links or files here)"
-                                           FontFamily="{ThemeResource ContentControlThemeFontFamily}" />
-                            </TextBox.Header>
-                        </TextBox>
-
-                        <TextBlock Grid.Row="1" Text="Save to" VerticalAlignment="Center" />
-                        <TextBox x:Name="SaveToBox" Grid.Row="1" Grid.Column="1" />
-                        <Button x:Name="BrowseFolderButton" Grid.Row="1" Grid.Column="2" Content="Browse…" Click="BrowseFolder_Click" />
-
-                        <TextBlock Grid.Row="2" Text="Continue" VerticalAlignment="Top" Margin="0,6,0,0" />
-                        <TextBox x:Name="PartBox" Grid.Row="2" Grid.Column="1" MaxHeight="96"
-                                 AcceptsReturn="True" TextWrapping="NoWrap" IsSpellCheckEnabled="False"
-                                 ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Auto"
-                                 PlaceholderText="Optional: unfinished downloads of this file, any name, one per line (ones in the save folder are found anyway)" />
-                        <Button x:Name="BrowsePartButton" Grid.Row="2" Grid.Column="2" VerticalAlignment="Top" Content="Browse…" Click="BrowsePart_Click" />
-
-                        <Grid Grid.Row="3" Grid.ColumnSpan="3" ColumnSpacing="12" Margin="0,4,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <CheckBox x:Name="DeleteLeftoversBox" VerticalAlignment="Bottom"
-                                      Content="Delete leftovers that can't go to the Recycle Bin, without asking"
-                                      ToolTipService.ToolTip="When unfinished files are put together, the ones not needed anymore go to the Recycle Bin. Ones that can't go there (too big for it, or their drive has none) can only be deleted for good: ticked, MirrorDL does that without asking; otherwise it asks when the download is done." />
-                            <Button x:Name="StartButton" Grid.Column="1" VerticalAlignment="Bottom" MinWidth="130"
-                                    AutomationProperties.Name="Start"
-                                    Style="{StaticResource AccentButtonStyle}" Click="Start_Click">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <FontIcon Glyph="&#xE896;" FontSize="14" />
-                                    <TextBlock x:Name="StartText" Text="Start" />
-                                </StackPanel>
-                            </Button>
-                            <Button x:Name="PauseButton" Grid.Column="2" VerticalAlignment="Bottom" MinWidth="130" IsEnabled="False"
-                                    AutomationProperties.Name="Pause" Click="Pause_Click">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <FontIcon Glyph="&#xE769;" FontSize="14" />
-                                    <TextBlock Text="Pause" />
-                                </StackPanel>
-                            </Button>
-                        </Grid>
-                    </Grid>
-                </Border>
-
-                <!-- Progress -->
-                <Border Style="{StaticResource Card}">
-                    <StackPanel Spacing="12">
-                        <Grid ColumnSpacing="12">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <StackPanel>
-                                <TextBlock x:Name="FileText" Text="Nothing to download yet" Style="{StaticResource SubtitleTextBlockStyle}"
-                                           TextTrimming="CharacterEllipsis" />
-                                <TextBlock x:Name="PhaseText" Text="Paste the links above and press Start." Style="{StaticResource Label}"
-                                           FontSize="14" TextTrimming="CharacterEllipsis" />
-                            </StackPanel>
-                            <TextBlock x:Name="PercentText" Grid.Column="1" Style="{StaticResource TitleTextBlockStyle}" VerticalAlignment="Center" />
-                        </Grid>
-
-                        <ProgressBar x:Name="Progress" Maximum="100" />
-
-                        <Border x:Name="MapFrame" Height="16" CornerRadius="4" BorderThickness="1"
-                                Background="{ThemeResource ControlFillColorSecondaryBrush}"
-                                BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
-                                ToolTipService.ToolTip="The whole file from start to end: filled parts are downloaded.">
-                            <Canvas x:Name="Map" SizeChanged="Map_SizeChanged" />
-                        </Border>
-
-                        <Grid ColumnSpacing="16" RowSpacing="10">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
-                            <StackPanel>
-                                <TextBlock Text="Downloaded" Style="{StaticResource Label}" />
-                                <TextBlock x:Name="DownloadedText" Style="{StaticResource Value}" />
-                            </StackPanel>
-                            <StackPanel Grid.Column="1">
-                                <TextBlock Text="Speed" Style="{StaticResource Label}" />
-                                <TextBlock x:Name="SpeedText" Style="{StaticResource Value}" />
-                            </StackPanel>
-                            <StackPanel Grid.Column="2">
-                                <TextBlock Text="Time" Style="{StaticResource Label}" />
-                                <TextBlock x:Name="ElapsedText" Style="{StaticResource Value}" />
-                            </StackPanel>
-                            <StackPanel Grid.Column="3">
-                                <TextBlock Text="Connections" Style="{StaticResource Label}" />
-                                <TextBlock x:Name="ConnectionsText" Style="{StaticResource Value}" />
-                            </StackPanel>
-                            <StackPanel Grid.Row="1">
-                                <TextBlock Text="Remaining" Style="{StaticResource Label}" />
-                                <TextBlock x:Name="RemainingText" Style="{StaticResource Value}" />
-                            </StackPanel>
-                            <StackPanel Grid.Row="1" Grid.Column="1">
-                                <TextBlock Text="Average speed" Style="{StaticResource Label}" />
-                                <TextBlock x:Name="AverageText" Style="{StaticResource Value}" />
-                            </StackPanel>
-                            <StackPanel Grid.Row="1" Grid.Column="2">
-                                <TextBlock Text="Time left" Style="{StaticResource Label}" />
-                                <TextBlock x:Name="LeftText" Style="{StaticResource Value}" />
-                            </StackPanel>
-                            <StackPanel Grid.Row="1" Grid.Column="3">
-                                <TextBlock Text="Links in use" Style="{StaticResource Label}" />
-                                <TextBlock x:Name="LinksText" Style="{StaticResource Value}" />
-                            </StackPanel>
-                        </Grid>
-
-                        <InfoBar x:Name="Result" IsOpen="False">
+                        <!-- Only in the GitHub version: the Store updates the Store version itself. -->
+                        <InfoBar x:Name="UpdateBar" IsOpen="False" Severity="Informational" Title="A new version is available">
                             <InfoBar.ActionButton>
-                                <Button x:Name="ShowButton" Content="Show in folder" Click="ShowInFolder_Click" />
+                                <Button Content="Download" Click="DownloadUpdate_Click" />
                             </InfoBar.ActionButton>
                         </InfoBar>
-                    </StackPanel>
-                </Border>
+                        <InfoBar x:Name="Notice" IsOpen="False" />
 
-                <!-- One row per link -->
-                <Border Style="{StaticResource Card}">
-                    <StackPanel Spacing="6">
-                        <Grid ColumnSpacing="12">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="32" />
-                                <ColumnDefinition Width="2*" />
-                                <ColumnDefinition Width="80" />
-                                <ColumnDefinition Width="44" />
-                                <ColumnDefinition Width="90" />
-                                <ColumnDefinition Width="90" />
-                                <ColumnDefinition Width="3*" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="#" Style="{StaticResource Label}" />
-                            <TextBlock Grid.Column="1" Text="Server" Style="{StaticResource Label}" />
-                            <TextBlock Grid.Column="2" Text="Size" Style="{StaticResource Label}" HorizontalTextAlignment="Right" />
-                            <TextBlock Grid.Column="3" Text="Conn." Style="{StaticResource Label}" HorizontalTextAlignment="Right" />
-                            <TextBlock Grid.Column="4" Text="Speed" Style="{StaticResource Label}" HorizontalTextAlignment="Right" />
-                            <TextBlock Grid.Column="5" Text="Downloaded" Style="{StaticResource Label}" HorizontalTextAlignment="Right" />
-                            <TextBlock Grid.Column="6" Text="Status" Style="{StaticResource Label}" />
-                        </Grid>
-                        <TextBlock x:Name="NoLinksText" Text="The links appear here once you press Start." Style="{StaticResource Label}" Margin="0,4" />
-                        <ItemsControl ItemsSource="{x:Bind Links}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="local:LinkRow">
-                                    <Grid ColumnSpacing="12" Padding="0,5" ToolTipService.ToolTip="{x:Bind Url}">
+                        <!-- New download -->
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="New download" Style="{StaticResource SubtitleTextBlockStyle}" />
+                                <TextBlock Style="{StaticResource Help}"
+                                           Text="Paste links, checksums or unfinished files into any box, or drop them on the window: each one goes into a box of its own, in the right list. Several links to the same file are used together as its mirrors; links to other files become downloads of their own." />
+
+                                <TextBlock Text="Links" Style="{StaticResource Section}" />
+                                <ScrollViewer MaxHeight="260" VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl ItemsSource="{x:Bind LinkEntries}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="local:EntryRow">
+                                                <Grid ColumnSpacing="8" Margin="0,2">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" MinWidth="90" />
+                                                        <ColumnDefinition Width="36" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBox Text="{x:Bind Text, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="{x:Bind Placeholder}"
+                                                             IsSpellCheckEnabled="False" FontFamily="Cascadia Mono, Consolas" Paste="Entry_Paste"
+                                                             AutomationProperties.Name="{x:Bind Placeholder}" />
+                                                    <TextBlock Grid.Column="1" Text="{x:Bind Hint, Mode=OneWay}" Foreground="{x:Bind HintBrush, Mode=OneWay}"
+                                                               Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" MaxWidth="220"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                    <Button Grid.Column="2" Style="{StaticResource IconButton}" Click="RemoveEntry_Click"
+                                                            Visibility="{x:Bind RemoveVisibility, Mode=OneWay}" ToolTipService.ToolTip="Remove"
+                                                            AutomationProperties.Name="Remove">
+                                                        <FontIcon Glyph="&#xE711;" FontSize="12" />
+                                                    </Button>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+
+                                <TextBlock Text="Checksums (optional)" Style="{StaticResource Section}" />
+                                <TextBlock Style="{StaticResource Help}"
+                                           Text="Each finished file is checked against its checksum. One with a file name goes with that file; one without goes with the file it matches." />
+                                <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl ItemsSource="{x:Bind ChecksumEntries}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="local:EntryRow">
+                                                <Grid ColumnSpacing="8" Margin="0,2">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" MinWidth="90" />
+                                                        <ColumnDefinition Width="36" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBox Text="{x:Bind Text, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="{x:Bind Placeholder}"
+                                                             IsSpellCheckEnabled="False" FontFamily="Cascadia Mono, Consolas" Paste="Entry_Paste"
+                                                             AutomationProperties.Name="{x:Bind Placeholder}" />
+                                                    <TextBlock Grid.Column="1" Text="{x:Bind Hint, Mode=OneWay}" Foreground="{x:Bind HintBrush, Mode=OneWay}"
+                                                               Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" MaxWidth="220"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                    <Button Grid.Column="2" Style="{StaticResource IconButton}" Click="RemoveEntry_Click"
+                                                            Visibility="{x:Bind RemoveVisibility, Mode=OneWay}" ToolTipService.ToolTip="Remove"
+                                                            AutomationProperties.Name="Remove">
+                                                        <FontIcon Glyph="&#xE711;" FontSize="12" />
+                                                    </Button>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="Unfinished files to continue (optional)" Style="{StaticResource Section}" />
+                                        <TextBlock Style="{StaticResource Help}"
+                                                   Text="From Firefox (.part), aria2 or MirrorDL, under any name. Ones in the save folder are found anyway." />
+                                    </StackPanel>
+                                    <Button x:Name="BrowsePartButton" Grid.Column="1" VerticalAlignment="Bottom" Content="Browse…" Click="BrowsePart_Click" />
+                                </Grid>
+                                <ItemsControl ItemsSource="{x:Bind PartEntries}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="local:EntryRow">
+                                            <Grid ColumnSpacing="8" Margin="0,2">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" MinWidth="90" />
+                                                    <ColumnDefinition Width="36" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBox Text="{x:Bind Text, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="{x:Bind Placeholder}"
+                                                         IsSpellCheckEnabled="False" FontFamily="Cascadia Mono, Consolas" Paste="Entry_Paste"
+                                                         AutomationProperties.Name="{x:Bind Placeholder}" />
+                                                <TextBlock Grid.Column="1" Text="{x:Bind Hint, Mode=OneWay}" Foreground="{x:Bind HintBrush, Mode=OneWay}"
+                                                           Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" MaxWidth="220"
+                                                           TextTrimming="CharacterEllipsis" />
+                                                <Button Grid.Column="2" Style="{StaticResource IconButton}" Click="RemoveEntry_Click"
+                                                        Visibility="{x:Bind RemoveVisibility, Mode=OneWay}" ToolTipService.ToolTip="Remove"
+                                                        AutomationProperties.Name="Remove">
+                                                    <FontIcon Glyph="&#xE711;" FontSize="12" />
+                                                </Button>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <Grid ColumnSpacing="8" Margin="0,6,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Save to" VerticalAlignment="Center" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                    <TextBox x:Name="SaveToBox" Grid.Column="1" AutomationProperties.Name="Save to" />
+                                    <Button x:Name="BrowseFolderButton" Grid.Column="2" Content="Browse…" Click="BrowseFolder_Click" />
+                                </Grid>
+
+                                <Grid ColumnSpacing="8" Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button Content="Clear" Click="ClearEntries_Click" ToolTipService.ToolTip="Empty all boxes of the new download" />
+                                    <Button x:Name="CheckButton" Grid.Column="2" MinWidth="150" Style="{StaticResource AccentButtonStyle}"
+                                            Click="Check_Click" AutomationProperties.Name="Check links">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <FontIcon Glyph="&#xE721;" FontSize="14" />
+                                            <TextBlock x:Name="CheckText" Text="Check links" />
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- What the links lead to, before anything is downloaded -->
+                        <Border x:Name="ReviewCard" Style="{StaticResource Card}" Visibility="Collapsed">
+                            <StackPanel Spacing="8">
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <ProgressRing x:Name="ReviewRing" Width="20" Height="20" IsActive="False" Visibility="Collapsed" />
+                                    <TextBlock x:Name="ReviewTitle" Grid.Column="1" Style="{StaticResource SubtitleTextBlockStyle}" TextWrapping="Wrap" />
+                                </Grid>
+                                <TextBlock x:Name="ReviewText" Style="{StaticResource Help}" />
+                                <ListView x:Name="ReviewList" ItemsSource="{x:Bind ReviewRows}" SelectionMode="None" MaxHeight="380">
+                                    <ListView.ItemContainerStyle>
+                                        <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
+                                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                            <Setter Property="Padding" Value="4,2" />
+                                        </Style>
+                                    </ListView.ItemContainerStyle>
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate x:DataType="local:ReviewRow">
+                                            <Grid ColumnSpacing="12" ToolTipService.ToolTip="{x:Bind Tip}">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="2*" />
+                                                    <ColumnDefinition Width="90" />
+                                                    <ColumnDefinition Width="60" />
+                                                    <ColumnDefinition Width="3*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <CheckBox IsChecked="{x:Bind IsSelected, Mode=TwoWay}" MinWidth="0" AutomationProperties.Name="{x:Bind FileName}" />
+                                                <TextBlock Grid.Column="1" Text="{x:Bind FileName}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Grid.Column="2" Text="{x:Bind Size}" VerticalAlignment="Center" HorizontalTextAlignment="Right" />
+                                                <TextBlock Grid.Column="3" Text="{x:Bind Links}" VerticalAlignment="Center" Style="{StaticResource Label}" />
+                                                <TextBlock Grid.Column="4" Text="{x:Bind Note}" Foreground="{x:Bind NoteBrush}" VerticalAlignment="Center"
+                                                           Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap" MaxLines="2" />
+                                                <Button Grid.Column="5" Content="Open page" Visibility="{x:Bind PageVisibility}" Click="OpenPage_Click"
+                                                        ToolTipService.ToolTip="Open the page to click its download button: MirrorDL takes the link from there" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="CancelReviewButton" Content="Cancel" Click="CancelReview_Click" />
+                                    <Button x:Name="DownloadButton" Grid.Column="2" MinWidth="150" Style="{StaticResource AccentButtonStyle}"
+                                            Click="Download_Click" IsEnabled="False" AutomationProperties.Name="Download">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <FontIcon Glyph="&#xE896;" FontSize="14" />
+                                            <TextBlock x:Name="DownloadText" Text="Download" />
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- The download list -->
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel Spacing="8">
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Downloads" Style="{StaticResource SubtitleTextBlockStyle}" />
+                                    <TextBlock x:Name="SummaryText" Grid.Column="1" Style="{StaticResource Label}" VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4">
+                                        <Button x:Name="ResumeAllButton" AutomationProperties.Name="Resume all" Click="ResumeAll_Click" ToolTipService.ToolTip="Resume all paused and waiting downloads">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <FontIcon Glyph="&#xE768;" FontSize="12" />
+                                                <TextBlock Text="Resume all" />
+                                            </StackPanel>
+                                        </Button>
+                                        <Button x:Name="PauseAllButton" AutomationProperties.Name="Pause all" Click="PauseAll_Click" ToolTipService.ToolTip="Pause all downloads; the progress is saved">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <FontIcon Glyph="&#xE769;" FontSize="12" />
+                                                <TextBlock Text="Pause all" />
+                                            </StackPanel>
+                                        </Button>
+                                        <Button x:Name="ClearFinishedButton" AutomationProperties.Name="Clear finished" Click="ClearFinished_Click"
+                                                ToolTipService.ToolTip="Take finished downloads off the list (they stay in the History; the files stay where they are)">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <FontIcon Glyph="&#xE74D;" FontSize="12" />
+                                                <TextBlock Text="Clear finished" />
+                                            </StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                </Grid>
+                                <TextBlock x:Name="NoDownloadsText" Style="{StaticResource Label}" Margin="0,4"
+                                           Text="Nothing here yet. Paste links above and press Check links." />
+                                <ListView x:Name="DownloadList" ItemsSource="{x:Bind Downloads}" SelectionMode="Single" MaxHeight="420"
+                                          SelectionChanged="DownloadList_SelectionChanged">
+                                    <ListView.ItemContainerStyle>
+                                        <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
+                                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                            <Setter Property="Padding" Value="4,2" />
+                                        </Style>
+                                    </ListView.ItemContainerStyle>
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate x:DataType="local:DownloadRow">
+                                            <Grid ColumnSpacing="10" Padding="0,4">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="20" />
+                                                    <ColumnDefinition Width="2*" />
+                                                    <ColumnDefinition Width="76" />
+                                                    <ColumnDefinition Width="120" />
+                                                    <ColumnDefinition Width="50" />
+                                                    <ColumnDefinition Width="80" />
+                                                    <ColumnDefinition Width="56" />
+                                                    <ColumnDefinition Width="2*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <FontIcon Glyph="{x:Bind Glyph, Mode=OneWay}" FontSize="14" Foreground="{x:Bind StatusBrush, Mode=OneWay}" />
+                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                    <TextBlock Text="{x:Bind FileName}" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{x:Bind FileName}" />
+                                                    <TextBlock Text="{x:Bind Links}" Style="{StaticResource Label}" />
+                                                </StackPanel>
+                                                <TextBlock Grid.Column="2" Text="{x:Bind SizeText, Mode=OneWay}" VerticalAlignment="Center" HorizontalTextAlignment="Right" />
+                                                <ProgressBar Grid.Column="3" Value="{x:Bind Percent, Mode=OneWay}" Maximum="100" VerticalAlignment="Center"
+                                                             IsIndeterminate="{x:Bind Indeterminate, Mode=OneWay}" ShowPaused="{x:Bind ShowPaused, Mode=OneWay}"
+                                                             ShowError="{x:Bind ShowError, Mode=OneWay}" />
+                                                <TextBlock Grid.Column="4" Text="{x:Bind PercentLabel, Mode=OneWay}" VerticalAlignment="Center" HorizontalTextAlignment="Right"
+                                                           Style="{StaticResource CaptionTextBlockStyle}" />
+                                                <TextBlock Grid.Column="5" Text="{x:Bind Speed, Mode=OneWay}" VerticalAlignment="Center" HorizontalTextAlignment="Right" />
+                                                <TextBlock Grid.Column="6" Text="{x:Bind Left, Mode=OneWay}" VerticalAlignment="Center" HorizontalTextAlignment="Right"
+                                                           Style="{StaticResource Label}" />
+                                                <TextBlock Grid.Column="7" Text="{x:Bind StatusText, Mode=OneWay}" Foreground="{x:Bind StatusBrush, Mode=OneWay}"
+                                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Style="{StaticResource CaptionTextBlockStyle}" />
+                                                <StackPanel Grid.Column="8" Orientation="Horizontal">
+                                                    <Button Style="{StaticResource IconButton}" Click="RowPause_Click" Visibility="{x:Bind PauseVisibility, Mode=OneWay}"
+                                                            ToolTipService.ToolTip="Pause this download (and the ones after it from the same check)" AutomationProperties.Name="Pause">
+                                                        <FontIcon Glyph="&#xE769;" FontSize="13" />
+                                                    </Button>
+                                                    <Button Style="{StaticResource IconButton}" Click="RowResume_Click" Visibility="{x:Bind ResumeVisibility, Mode=OneWay}"
+                                                            ToolTipService.ToolTip="Resume" AutomationProperties.Name="Resume">
+                                                        <FontIcon Glyph="&#xE768;" FontSize="13" />
+                                                    </Button>
+                                                    <Button Style="{StaticResource IconButton}" Click="RowFolder_Click" Visibility="{x:Bind FolderVisibility, Mode=OneWay}"
+                                                            ToolTipService.ToolTip="Show in folder" AutomationProperties.Name="Show in folder">
+                                                        <FontIcon Glyph="&#xE838;" FontSize="13" />
+                                                    </Button>
+                                                    <Button Style="{StaticResource IconButton}" Click="RowRemove_Click" Visibility="{x:Bind RemoveVisibility, Mode=OneWay}"
+                                                            ToolTipService.ToolTip="Take off the list; files on the disk stay as they are" AutomationProperties.Name="Remove">
+                                                        <FontIcon Glyph="&#xE711;" FontSize="12" />
+                                                    </Button>
+                                                </StackPanel>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- The selected download -->
+                        <Border x:Name="DetailsCard" Style="{StaticResource Card}" Visibility="Collapsed">
+                            <StackPanel Spacing="12">
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock x:Name="FileText" Style="{StaticResource SubtitleTextBlockStyle}" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock x:Name="PhaseText" Style="{StaticResource Label}" FontSize="14" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                    <TextBlock x:Name="PercentText" Grid.Column="1" Style="{StaticResource TitleTextBlockStyle}" VerticalAlignment="Center" />
+                                </Grid>
+
+                                <ProgressBar x:Name="Progress" Maximum="100" />
+
+                                <Border x:Name="MapFrame" Height="16" CornerRadius="4" BorderThickness="1"
+                                        Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                        BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                        ToolTipService.ToolTip="The whole file from start to end: filled parts are downloaded.">
+                                    <Canvas x:Name="Map" SizeChanged="Map_SizeChanged" />
+                                </Border>
+
+                                <Grid ColumnSpacing="16" RowSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="Downloaded" Style="{StaticResource Label}" />
+                                        <TextBlock x:Name="DownloadedText" Style="{StaticResource Value}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Text="Speed" Style="{StaticResource Label}" />
+                                        <TextBlock x:Name="SpeedText" Style="{StaticResource Value}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="Time" Style="{StaticResource Label}" />
+                                        <TextBlock x:Name="ElapsedText" Style="{StaticResource Value}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="3">
+                                        <TextBlock Text="Connections" Style="{StaticResource Label}" />
+                                        <TextBlock x:Name="ConnectionsText" Style="{StaticResource Value}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="1">
+                                        <TextBlock Text="Remaining" Style="{StaticResource Label}" />
+                                        <TextBlock x:Name="RemainingText" Style="{StaticResource Value}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="1" Grid.Column="1">
+                                        <TextBlock Text="Average speed" Style="{StaticResource Label}" />
+                                        <TextBlock x:Name="AverageText" Style="{StaticResource Value}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="1" Grid.Column="2">
+                                        <TextBlock Text="Time left" Style="{StaticResource Label}" />
+                                        <TextBlock x:Name="LeftText" Style="{StaticResource Value}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="1" Grid.Column="3">
+                                        <TextBlock Text="Links in use" Style="{StaticResource Label}" />
+                                        <TextBlock x:Name="LinksText" Style="{StaticResource Value}" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <InfoBar x:Name="Result" IsOpen="False" IsClosable="False">
+                                    <InfoBar.ActionButton>
+                                        <Button x:Name="ShowButton" Content="Show in folder" Click="ShowInFolder_Click" />
+                                    </InfoBar.ActionButton>
+                                </InfoBar>
+
+                                <!-- One row per link -->
+                                <StackPanel Spacing="6">
+                                    <Grid ColumnSpacing="12">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="32" />
+                                            <ColumnDefinition Width="40" />
                                             <ColumnDefinition Width="2*" />
                                             <ColumnDefinition Width="80" />
                                             <ColumnDefinition Width="44" />
@@ -230,39 +467,144 @@
                                             <ColumnDefinition Width="90" />
                                             <ColumnDefinition Width="3*" />
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Text="{x:Bind Number}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                        <TextBlock Grid.Column="1" Text="{x:Bind Server, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Grid.Column="2" Text="{x:Bind Size, Mode=OneWay}" HorizontalTextAlignment="Right" />
-                                        <TextBlock Grid.Column="3" Text="{x:Bind Connections, Mode=OneWay}" HorizontalTextAlignment="Right" />
-                                        <TextBlock Grid.Column="4" Text="{x:Bind Speed, Mode=OneWay}" HorizontalTextAlignment="Right" />
-                                        <TextBlock Grid.Column="5" Text="{x:Bind Downloaded, Mode=OneWay}" HorizontalTextAlignment="Right" />
-                                        <TextBlock Grid.Column="6" Text="{x:Bind Status, Mode=OneWay}" Foreground="{x:Bind StatusBrush, Mode=OneWay}"
-                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="#" Style="{StaticResource Label}" />
+                                        <TextBlock Grid.Column="1" Text="Server" Style="{StaticResource Label}" />
+                                        <TextBlock Grid.Column="2" Text="Size" Style="{StaticResource Label}" HorizontalTextAlignment="Right" />
+                                        <TextBlock Grid.Column="3" Text="Conn." Style="{StaticResource Label}" HorizontalTextAlignment="Right" />
+                                        <TextBlock Grid.Column="4" Text="Speed" Style="{StaticResource Label}" HorizontalTextAlignment="Right" />
+                                        <TextBlock Grid.Column="5" Text="Downloaded" Style="{StaticResource Label}" HorizontalTextAlignment="Right" />
+                                        <TextBlock Grid.Column="6" Text="Status" Style="{StaticResource Label}" />
                                     </Grid>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </StackPanel>
-                </Border>
+                                    <ItemsControl ItemsSource="{x:Bind Links}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="local:LinkRow">
+                                                <Grid ColumnSpacing="12" Padding="0,5" ToolTipService.ToolTip="{x:Bind Url}">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="40" />
+                                                        <ColumnDefinition Width="2*" />
+                                                        <ColumnDefinition Width="80" />
+                                                        <ColumnDefinition Width="44" />
+                                                        <ColumnDefinition Width="90" />
+                                                        <ColumnDefinition Width="90" />
+                                                        <ColumnDefinition Width="3*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="{x:Bind Number}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                    <TextBlock Grid.Column="1" Text="{x:Bind Server, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Grid.Column="2" Text="{x:Bind Size, Mode=OneWay}" HorizontalTextAlignment="Right" />
+                                                    <TextBlock Grid.Column="3" Text="{x:Bind Connections, Mode=OneWay}" HorizontalTextAlignment="Right" />
+                                                    <TextBlock Grid.Column="4" Text="{x:Bind Speed, Mode=OneWay}" HorizontalTextAlignment="Right" />
+                                                    <TextBlock Grid.Column="5" Text="{x:Bind Downloaded, Mode=OneWay}" HorizontalTextAlignment="Right" />
+                                                    <TextBlock Grid.Column="6" Text="{x:Bind Status, Mode=OneWay}" Foreground="{x:Bind StatusBrush, Mode=OneWay}"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
 
-                <!-- Messages -->
-                <Expander Header="Details" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-                    <ListView x:Name="LogList" ItemsSource="{x:Bind LogLines}" SelectionMode="None" Height="170">
+                                <!-- Messages -->
+                                <Expander Header="Messages" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                                    <ListView x:Name="LogList" ItemsSource="{x:Bind LogLines}" SelectionMode="None" Height="170">
+                                        <ListView.ItemContainerStyle>
+                                            <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
+                                                <Setter Property="MinHeight" Value="0" />
+                                                <Setter Property="Padding" Value="4,1" />
+                                            </Style>
+                                        </ListView.ItemContainerStyle>
+                                        <ListView.ItemTemplate>
+                                            <DataTemplate x:DataType="local:LogLine">
+                                                <TextBlock Text="{x:Bind Text}" Foreground="{x:Bind Brush}" TextWrapping="Wrap" IsTextSelectionEnabled="True"
+                                                           FontFamily="Cascadia Mono, Consolas" FontSize="12" />
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+                                </Expander>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- ===================== History ===================== -->
+                <Grid x:Name="HistoryPage" Visibility="Collapsed" Padding="20,12,20,20" RowSpacing="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="History" Style="{StaticResource SubtitleTextBlockStyle}" VerticalAlignment="Center" />
+                        <AutoSuggestBox x:Name="HistorySearch" Grid.Column="1" MaxWidth="420" HorizontalAlignment="Left" PlaceholderText="Search by name or link"
+                                        QueryIcon="Find" TextChanged="HistorySearch_TextChanged" />
+                        <Button Grid.Column="2" Click="ClearHistory_Click" AutomationProperties.Name="Clear history" ToolTipService.ToolTip="Forget all finished downloads; the files stay where they are">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE74D;" FontSize="12" />
+                                <TextBlock Text="Clear history" />
+                            </StackPanel>
+                        </Button>
+                    </Grid>
+                    <TextBlock x:Name="HistoryInfo" Grid.Row="1" Style="{StaticResource Help}" />
+                    <ListView x:Name="HistoryList" Grid.Row="2" ItemsSource="{x:Bind HistoryRows}" SelectionMode="None">
                         <ListView.ItemContainerStyle>
                             <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
-                                <Setter Property="MinHeight" Value="0" />
-                                <Setter Property="Padding" Value="4,1" />
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                             </Style>
                         </ListView.ItemContainerStyle>
                         <ListView.ItemTemplate>
-                            <DataTemplate x:DataType="local:LogLine">
-                                <TextBlock Text="{x:Bind Text}" Foreground="{x:Bind Brush}" TextWrapping="Wrap" IsTextSelectionEnabled="True"
-                                           FontFamily="Cascadia Mono, Consolas" FontSize="12" />
+                            <DataTemplate x:DataType="local:HistoryRow">
+                                <Grid ColumnSpacing="12" Padding="0,6" Opacity="{x:Bind Opacity}" ToolTipService.ToolTip="{x:Bind Tip}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="2*" />
+                                        <ColumnDefinition Width="80" />
+                                        <ColumnDefinition Width="130" />
+                                        <ColumnDefinition Width="120" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="{x:Bind FileName}" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{x:Bind Folder}" Style="{StaticResource Label}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1" Text="{x:Bind Size}" VerticalAlignment="Center" HorizontalTextAlignment="Right" />
+                                    <TextBlock Grid.Column="2" Text="{x:Bind When}" VerticalAlignment="Center" Style="{StaticResource Label}" />
+                                    <TextBlock Grid.Column="3" Text="{x:Bind Outcome}" Foreground="{x:Bind OutcomeBrush}" VerticalAlignment="Center"
+                                               Style="{StaticResource CaptionTextBlockStyle}" />
+                                    <StackPanel Grid.Column="4" Orientation="Horizontal">
+                                        <Button Style="{StaticResource IconButton}" Click="HistoryOpen_Click" ToolTipService.ToolTip="Open the file" AutomationProperties.Name="Open">
+                                            <FontIcon Glyph="&#xE8E5;" FontSize="13" />
+                                        </Button>
+                                        <Button Style="{StaticResource IconButton}" Click="HistoryFolder_Click" ToolTipService.ToolTip="Show in folder" AutomationProperties.Name="Show in folder">
+                                            <FontIcon Glyph="&#xE838;" FontSize="13" />
+                                        </Button>
+                                        <Button Style="{StaticResource IconButton}" Click="HistoryAgain_Click" ToolTipService.ToolTip="Put its links into a new download" AutomationProperties.Name="Download again">
+                                            <FontIcon Glyph="&#xE72C;" FontSize="13" />
+                                        </Button>
+                                        <Button Style="{StaticResource IconButton}" Click="HistoryCopy_Click" ToolTipService.ToolTip="Copy its links" AutomationProperties.Name="Copy links">
+                                            <FontIcon Glyph="&#xE8C8;" FontSize="13" />
+                                        </Button>
+                                        <Button Style="{StaticResource IconButton}" Click="HistoryRemove_Click" ToolTipService.ToolTip="Remove from the history; the file stays" AutomationProperties.Name="Remove">
+                                            <FontIcon Glyph="&#xE711;" FontSize="12" />
+                                        </Button>
+                                    </StackPanel>
+                                </Grid>
                             </DataTemplate>
                         </ListView.ItemTemplate>
                     </ListView>
-                </Expander>
-            </StackPanel>
-        </ScrollViewer>
+                </Grid>
+
+                <!-- ===================== Settings ===================== -->
+                <ScrollViewer x:Name="SettingsPage" Visibility="Collapsed">
+                    <StackPanel x:Name="SettingsPanel" Padding="20,12,20,20" Spacing="6" MaxWidth="980" HorizontalAlignment="Stretch">
+                        <TextBlock Text="Settings" Style="{StaticResource SubtitleTextBlockStyle}" />
+                        <TextBlock Style="{StaticResource Help}" Margin="0,0,0,8"
+                                   Text="Everything here is kept on this PC only. Changes count right away; for downloads, from the next one you start." />
+                        <!-- The setting cards are made in MainWindow.Settings.cs, each with its explanation. -->
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+        </NavigationView>
     </Grid>
 </Window>

@@ -9,132 +9,104 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media.Imaging;
-using Rectangle = Microsoft.UI.Xaml.Shapes.Rectangle;
-using Windows.ApplicationModel.DataTransfer;
 using Windows.Graphics;
-using Windows.Storage.Pickers;
 
 namespace MirrorDL.App;
 
+/// <summary>
+/// The window: Downloads (a new download, what its links lead to, the download list and the selected download),
+/// History and Settings. The parts are in MainWindow.*.cs.
+/// </summary>
 public sealed partial class MainWindow : Window
 {
-    public ObservableCollection<LinkRow> Links { get; } = [];
-    public ObservableCollection<LogLine> LogLines { get; } = [];
-
+    readonly Settings _settings = Settings.Load();
     readonly DispatcherQueueTimer _timer;
-    Session? _session;
-    CancellationTokenSource? _cts;
-    Task<int>? _run;
-    Status? _status;
-    bool _closeWhenStopped;
+    readonly IntPtr _hwnd;
     Uri? _updatePage;
-    ContentDialog? _question; // a question of the download that waits for an answer
+    bool _closing, _shutDown;
+    // Questions of the downloads, one at a time: WinUI shows only one dialog at once.
+    readonly SemaphoreSlim _questions = new(1);
+    ContentDialog? _question;
+    Run? _questionRun;
 
-    public MainWindow()
+    public MainWindow(string[] args)
     {
         InitializeComponent();
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
+        _hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "mirrordl.ico"));
         TitleBarIcon.Source = new BitmapImage(new Uri(Path.Combine(AppContext.BaseDirectory, "logo-64.png")));
         PlaceWindow();
-        SaveToBox.PlaceholderText = Native.DownloadsFolder();
         VersionText.Text = AppInfo.Version;
-        if (!Native.IsPackaged()) _ = CheckForUpdateAsync();
+        SaveToBox.PlaceholderText = Native.DownloadsFolder();
+        SaveToBox.Text = _settings.SaveTo ?? "";
+        foreach (var kind in new[] { EntryKind.Link, EntryKind.Checksum, EntryKind.Unfinished }) KeepEmptyBox(kind);
+        CheckText.Text = _settings.Review ? "Check links" : "Start";
 
         _timer = DispatcherQueue.CreateTimer();
         _timer.Interval = TimeSpan.FromMilliseconds(500);
         _timer.Tick += (_, _) => Refresh();
+        _timer.Start();
         AppWindow.Closing += AppWindow_Closing;
+        Closed += (_, _) => ShutDown();
 
-        // Files dropped on MirrorDL.exe, or links passed on the command line; --start starts right away.
-        var args = Environment.GetCommandLineArgs().Skip(1).ToList();
+        ApplyTheme();
+        BuildSettings();
+        LoadHistory();
+        RestoreList();
+        ApplyClickNLoad();
+        ApplyClipboard();
+        if (!Native.IsPackaged() && _settings.CheckForUpdates) _ = CheckForUpdateAsync();
+
+        if (args.Contains("--start"))
+            Root.Loaded += (_, _) => Take(args);
+        else
+        {
+            Take(args);
+            if (_settings.ResumeAtStart) Root.Loaded += (_, _) => ResumeAll_Click(this, new RoutedEventArgs());
+        }
+    }
+
+    /// <summary>
+    /// Files dropped on MirrorDL.exe, or links passed on the command line - at start, or by a later start that handed
+    /// them over (<see cref="SingleInstance"/>); --start checks them and starts right away. Brings the window to the front.
+    /// </summary>
+    public void Take(IReadOnlyList<string> args)
+    {
+        if (_shutDown) return;
         foreach (string arg in args.Where(a => a != "--start"))
         {
             // A .txt file that can't be read (in use, only in the cloud) must not keep the window from opening.
-            try { Use(arg); }
+            try { Distribute(arg); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                ShowResult(InfoBarSeverity.Warning, "Couldn't use what was given", $"{arg}: {ex.Message}");
+                ShowNotice(InfoBarSeverity.Warning, "Couldn't use what was given", $"{arg}: {ex.Message}");
             }
         }
-        if (args.Contains("--start"))
-            Root.Loaded += (_, _) => Start_Click(this, new RoutedEventArgs());
+        if (AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } presenter) presenter.Restore();
+        Activate();
+        if (args.Contains("--start")) _ = CheckAsync(start: true);
     }
 
-    async void Start_Click(object sender, RoutedEventArgs e)
+    void Nav_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
-        var job = new Job();
-        var ignored = new List<string>();
-        foreach (string line in LinksBox.Text.Split('\r', '\n')) Input.Add(line, job, ignored);
-
-        foreach (string line in PartBox.Text.Split('\r', '\n'))
-        {
-            string part = line.Trim().Trim('"');
-            if (part.Length == 0) continue;
-            if (!File.Exists(part))
-            {
-                ShowResult(InfoBarSeverity.Warning, "Can't continue that file", $"{part} doesn't exist.");
-                return;
-            }
-            Input.Add(part, job, []);
-        }
-        string saveTo = SaveToBox.Text.Trim().Trim('"');
-        if (saveTo.Length > 0)
-        {
-            try { job.OutDir = Path.GetFullPath(saveTo); }
-            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or IOException)
-            {
-                ShowResult(InfoBarSeverity.Warning, "Can't use that folder", $"{saveTo}: {ex.Message}");
-                return;
-            }
-        }
-        if (job.Urls.Count == 0)
-        {
-            ShowResult(InfoBarSeverity.Warning, "No links", "Paste at least one download link, starting with http:// or https://.");
-            return;
-        }
-        job.DeleteLeftovers = DeleteLeftoversBox.IsChecked == true;
-        await RunAsync(job, ignored);
+        string page = args.IsSettingsSelected ? "settings" : args.SelectedItemContainer?.Tag as string ?? "downloads";
+        DownloadsPage.Visibility = page == "downloads" ? Visibility.Visible : Visibility.Collapsed;
+        HistoryPage.Visibility = page == "history" ? Visibility.Visible : Visibility.Collapsed;
+        SettingsPage.Visibility = page == "settings" ? Visibility.Visible : Visibility.Collapsed;
+        if (page == "history") FilterHistory();
     }
 
-    async Task RunAsync(Job job, List<string> ignored)
+    void ShowDownloads() => Nav.SelectedItem = DownloadsItem;
+
+    /// <summary>A message at the top of the Downloads page.</summary>
+    void ShowNotice(InfoBarSeverity severity, string title, string? message)
     {
-        LogLines.Clear();
-        Links.Clear();
-        Result.IsOpen = false;
-        if (ignored.Count > 0)
-            AddLog("Ignored: " + string.Join(", ", ignored.Take(5).Select(s => Format.Clip(s, 40))) +
-                   (ignored.Count > 5 ? $" and {ignored.Count - 5} more" : ""), LogKind.Dim);
-
-        var session = new Session(job) { ConfirmAsync = ConfirmAsync };
-        foreach (var m in session.Mirrors) Links.Add(new LinkRow(m));
-        NoLinksText.Visibility = Visibility.Collapsed;
-        session.Log += (text, kind) => DispatcherQueue.TryEnqueue(() => AddLog(text, kind));
-        session.PhaseChanged += _ => DispatcherQueue.TryEnqueue(Refresh);
-        session.LinksChecked += () => DispatcherQueue.TryEnqueue(Refresh);
-        _session = session;
-        var cts = _cts = new CancellationTokenSource();
-        SetRunning(true);
-        _timer.Start();
-        Refresh();
-
-        int code;
-        try
-        {
-            _run = Task.Run(() => session.RunAsync(cts.Token));
-            code = await _run;
-        }
-        catch (Exception ex)
-        {
-            AddLog("Unexpected error: " + ex, LogKind.Error);
-            code = -1;
-        }
-        _timer.Stop();
-        Refresh();
-        SetRunning(false);
-        ShowOutcome(session, code);
-        if (_closeWhenStopped) Close();
+        Notice.Severity = severity;
+        Notice.Title = title;
+        Notice.Message = message ?? "";
+        Notice.IsOpen = true;
     }
 
     async Task CheckForUpdateAsync()
@@ -147,193 +119,76 @@ public sealed partial class MainWindow : Window
 
     void DownloadUpdate_Click(object sender, RoutedEventArgs e)
     {
-        if (_updatePage != null) Process.Start(new ProcessStartInfo(_updatePage.ToString()) { UseShellExecute = true });
+        if (_updatePage != null) Open(_updatePage.ToString());
     }
 
-    void Pause_Click(object sender, RoutedEventArgs e)
+    /// <summary>Opens a file or web page with the program Windows has for it; says so if there is none.</summary>
+    void Open(string target)
     {
-        _cts?.Cancel();
-        _question?.Hide(); // an open question counts as "no", so the download can stop
-        PauseButton.IsEnabled = false;
-        PhaseText.Text = "Pausing and saving the progress…";
+        try
+        {
+            Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
+        }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException or FileNotFoundException)
+        {
+            ShowNotice(InfoBarSeverity.Warning, "Couldn't open it", $"{target}: {e.Message}");
+        }
     }
 
-    /// <summary>Closing during a download pauses it first, so the progress is saved.</summary>
+    /// <summary>Closing while downloads run pauses them first, so their progress is saved; the list is kept for next time.</summary>
     void AppWindow_Closing(AppWindow sender, AppWindowClosingEventArgs args)
     {
-        if (_run is not { IsCompleted: false }) return;
-        args.Cancel = true;
-        _closeWhenStopped = true;
-        Pause_Click(this, new RoutedEventArgs());
-    }
-
-    void Refresh()
-    {
-        if (_session is not { } session) return;
-        var s = _status = session.GetStatus();
-        bool verifying = s.Phase == Phase.Verifying;
-        double percent = verifying ? s.VerifyPercent : s.Percent;
-
-        FileText.Text = session.Target?.Name ?? "Checking the links…";
-        // Until the pause is done (saving the progress of a big file takes a moment), say that it is coming.
-        bool pausing = _cts?.IsCancellationRequested == true && _run is { IsCompleted: false };
-        PhaseText.Text = pausing ? "Pausing and saving the progress…" : Describe(s);
-        Progress.IsIndeterminate = s.Phase is Phase.Starting or Phase.Checking or Phase.Comparing or Phase.Finishing;
-        Progress.Value = percent;
-        Progress.ShowPaused = s.Phase is Phase.Paused or Phase.Cancelled;
-        Progress.ShowError = s.Phase == Phase.Failed;
-        PercentText.Text = s.Size is > 0 || verifying ? Format.Percent(percent) : "";
-
-        DownloadedText.Text = s.Size is long size ? $"{Format.Bytes(s.Have)} of {Format.Bytes(size)}" : Format.Bytes(s.Have);
-        RemainingText.Text = s.Size is long total ? Format.Bytes(total - s.Have) : "–";
-        SpeedText.Text = s.Phase == Phase.Downloading ? Format.Speed(s.Speed) : "–";
-        AverageText.Text = s.AverageSpeed > 0 ? Format.Speed(s.AverageSpeed) : "–";
-        ElapsedText.Text = s.Elapsed > TimeSpan.Zero ? Format.Duration(s.Elapsed.TotalSeconds) : "–";
-        LeftText.Text = s.Phase == Phase.Downloading && s.SecondsLeft is double left ? Format.Duration(left) : "–";
-        ConnectionsText.Text = s.Connections.ToString();
-        LinksText.Text = $"{s.Links.Count(l => l.Link.Usable)} of {s.Links.Count}";
-        for (int i = 0; i < Links.Count && i < s.Links.Count; i++) Links[i].Update(s.Links[i], s.Phase);
-        DrawMap();
-    }
-
-    static string Describe(Status s) => s.Phase switch
-    {
-        Phase.Starting or Phase.Checking => "Checking the links…",
-        Phase.Comparing => "Comparing the content of the links…",
-        Phase.Copying => "Copying what the other unfinished files hold…",
-        Phase.Downloading => $"Downloading from {Format.Plural(s.Links.Count(l => l.Connections > 0), "link")}",
-        Phase.Finishing => "Finishing…",
-        Phase.Verifying => "Checking the checksum…",
-        Phase.Finished => "Done",
-        Phase.Paused => "Paused. Press Continue to go on.",
-        Phase.Cancelled => "Cancelled",
-        Phase.Failed => "Failed. See the details below.",
-        _ => "",
-    };
-
-    /// <summary>Draws the file from start to end: filled where downloaded, half-filled where partly.</summary>
-    void DrawMap()
-    {
-        Map.Children.Clear();
-        if (_status is not { Size: long size and > 0 } s) return;
-        double width = Map.ActualWidth, height = Map.ActualHeight;
-        if (width <= 0 || height <= 0) return;
-
-        int cells = Math.Max(1, (int)(width / 2));
-        double perCell = (double)size / cells;
-        var covered = new double[cells];
-        foreach (var (start, end) in Ranges.Invert(s.Missing, size))
+        _settings.SaveTo = SaveToBox.Text.Trim();
+        _settings.Save();
+        if (_runs.Any(r => r.IsRunning))
         {
-            int first = (int)(start / perCell), last = (int)Math.Min(cells - 1, (end - 1) / perCell);
-            for (int c = first; c <= last; c++)
-                covered[c] += (Math.Min(end, (c + 1) * perCell) - Math.Max(start, c * perCell)) / perCell;
-        }
-
-        static int Level(double share) => share >= 0.999 ? 2 : share > 0.001 ? 1 : 0;
-        var brush = Brushes.Accent;
-        for (int i = 0, j; i < cells; i = j)
-        {
-            int level = Level(covered[i]);
-            for (j = i + 1; j < cells && Level(covered[j]) == level; j++) { }
-            if (level == 0) continue;
-            var block = new Rectangle { Width = (j - i) * width / cells, Height = height, Fill = brush, Opacity = level == 2 ? 1 : 0.45 };
-            Canvas.SetLeft(block, i * width / cells);
-            Map.Children.Add(block);
+            args.Cancel = true;
+            _closing = true;
+            PauseAll_Click(this, new RoutedEventArgs());
         }
     }
 
-    void Map_SizeChanged(object sender, SizeChangedEventArgs e) => DrawMap();
-
-    void ShowOutcome(Session session, int code)
+    /// <summary>
+    /// Once the window is closed - by the user, or by MirrorDL after pausing: nothing of it may run on. Window.Close()
+    /// doesn't raise AppWindow.Closing, so this is on Closed.
+    /// </summary>
+    void ShutDown()
     {
-        StartText.Text = "Start";
-        switch (code)
-        {
-            case 0 when session.SizeOnly:
-                ShowResult(InfoBarSeverity.Warning, "Only the size could be checked",
-                    $"These links can't send parts of the file to compare. Paste its checksum with the links to check it: {session.SavedPath}",
-                    canShow: true);
-                break;
-            case 0 when session.CheckedOnly:
-                ShowResult(InfoBarSeverity.Success, "The file is complete",
-                    $"It was only checked, and stays as it was: {session.SavedPath}", canShow: true);
-                break;
-            case 0:
-                ShowResult(InfoBarSeverity.Success, "Download complete", session.SavedPath, canShow: true);
-                break;
-            case 2 when session.CheckedOnly:
-                ShowResult(InfoBarSeverity.Warning, "The file doesn't match",
-                    $"It is damaged, or the checksum or the links are for another version. It was left as it was: {session.SavedPath}",
-                    canShow: true);
-                break;
-            case 2:
-                ShowResult(InfoBarSeverity.Warning, "Saved, but the checksum doesn't match",
-                    $"The file is damaged, or the checksum is for another version: {session.SavedPath}", canShow: true);
-                break;
-            case 130 when session.Phase == Phase.Paused:
-                StartText.Text = "Continue";
-                ShowResult(InfoBarSeverity.Informational, "Paused",
-                    "The progress is saved. Press Continue to go on, also after closing MirrorDL.");
-                break;
-            case 130:
-                ShowResult(InfoBarSeverity.Informational, "Stopped", session.Note);
-                break;
-            default:
-                ShowResult(InfoBarSeverity.Error, "Download failed", session.ErrorMessage ?? "See the details below.");
-                break;
-        }
+        if (_shutDown) return;
+        _shutDown = true;
+        _closing = true;
+        SaveList();
+        _timer.Stop();
+        _cnl?.Dispose();
+        _cnl = null;
+        Windows.ApplicationModel.DataTransfer.Clipboard.ContentChanged -= Clipboard_ContentChanged;
+        WindowsShell.KeepAwake(false);
+        foreach (var browser in _browsers.ToList()) browser.Close();
     }
 
-    void ShowResult(InfoBarSeverity severity, string title, string? message, bool canShow = false)
-    {
-        Result.Severity = severity;
-        Result.Title = title;
-        Result.Message = message ?? "";
-        ShowButton.Visibility = canShow ? Visibility.Visible : Visibility.Collapsed;
-        Result.IsOpen = true;
-    }
-
-    void ShowInFolder_Click(object sender, RoutedEventArgs e)
-    {
-        if (_session?.SavedPath is { } path)
-            Process.Start("explorer.exe", $"/select,\"{path}\"");
-    }
-
-    void SetRunning(bool running)
-    {
-        StartButton.IsEnabled = !running;
-        PauseButton.IsEnabled = running;
-        LinksBox.IsReadOnly = running;
-        foreach (var control in new Control[] { SaveToBox, PartBox, BrowseFolderButton, BrowsePartButton, DeleteLeftoversBox })
-            control.IsEnabled = !running;
-    }
-
-    void AddLog(string text, LogKind kind)
-    {
-        var line = new LogLine(text, Brushes.For(kind));
-        LogLines.Add(line);
-        LogList.ScrollIntoView(line);
-    }
-
-    /// <summary>Asks the download's question; "no" when it is closed without an answer (Pause, closing the window).</summary>
-    Task<bool> ConfirmAsync(string question)
+    /// <summary>Asks a download's question; "no" when it is closed without an answer (Pause, closing the window).</summary>
+    Task<bool> ConfirmAsync(Run run, BatchFile file, string question)
     {
         var answer = new TaskCompletionSource<bool>();
         bool queued = DispatcherQueue.TryEnqueue(async () =>
         {
             // async void: an exception here would end the app - and leave the download waiting for ever.
+            bool waited = false;
             try
             {
-                if (_cts?.IsCancellationRequested == true)
+                await _questions.WaitAsync(run.Cts?.Token ?? new CancellationToken(canceled: true));
+                waited = true;
+                if (run.Cts?.IsCancellationRequested != false || _closing)
                 {
                     answer.TrySetResult(false); // asked just after Pause: no dialog to stand in the way of stopping
                     return;
                 }
+                _questionRun = run;
                 _question = new ContentDialog
                 {
                     XamlRoot = Root.XamlRoot,
-                    Title = "MirrorDL",
-                    Content = question,
+                    Title = file.Name,
+                    Content = new TextBlock { Text = question, TextWrapping = TextWrapping.Wrap },
                     PrimaryButtonText = "Yes",
                     CloseButtonText = "No",
                     DefaultButton = ContentDialogButton.Close,
@@ -342,92 +197,26 @@ public sealed partial class MainWindow : Window
             }
             catch (Exception ex)
             {
-                AddLog("Could not ask: " + ex.Message, LogKind.Warn);
+                run.Log.Add(new LogLine("Could not ask: " + ex.Message, Brushes.Caution));
                 answer.TrySetResult(false);
             }
             finally
             {
                 _question = null;
+                _questionRun = null;
+                if (waited) _questions.Release();
             }
         });
         if (!queued) answer.TrySetResult(false); // the window is going away
         return answer.Task;
     }
 
-    async void BrowseFolder_Click(object sender, RoutedEventArgs e)
+    /// <summary>Opens Explorer with the file selected.</summary>
+    static void ShowInExplorer(string? path)
     {
-        var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.Downloads };
-        picker.FileTypeFilter.Add("*");
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-        if (await picker.PickSingleFolderAsync() is { } folder) SaveToBox.Text = folder.Path;
-    }
-
-    async void BrowsePart_Click(object sender, RoutedEventArgs e)
-    {
-        var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.Downloads };
-        foreach (string type in new[] { ".part", ".aria2", ".mirrordl", "*" }) picker.FileTypeFilter.Add(type);
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-        foreach (var file in await picker.PickMultipleFilesAsync()) AppendPart(file.Path);
-    }
-
-    void Root_DragOver(object sender, DragEventArgs e)
-    {
-        if (StartButton.IsEnabled && (e.DataView.Contains(StandardDataFormats.StorageItems)
-            || e.DataView.Contains(StandardDataFormats.WebLink) || e.DataView.Contains(StandardDataFormats.Text)))
-        {
-            e.AcceptedOperation = DataPackageOperation.Copy;
-            e.DragUIOverride.Caption = "Add";
-        }
-    }
-
-    async void Root_Drop(object sender, DragEventArgs e)
-    {
-        // async void: an exception here would end the app, and a drop can fail for reasons outside it (the
-        // source app took the data back, a file in the cloud could not be fetched).
-        try
-        {
-            if (e.DataView.Contains(StandardDataFormats.StorageItems))
-                foreach (var item in await e.DataView.GetStorageItemsAsync()) Use(item.Path);
-            else if (e.DataView.Contains(StandardDataFormats.WebLink))
-                AppendLinks((await e.DataView.GetWebLinkAsync()).ToString());
-            else if (e.DataView.Contains(StandardDataFormats.Text))
-                AppendLinks(await e.DataView.GetTextAsync());
-        }
-        catch (Exception ex)
-        {
-            ShowResult(InfoBarSeverity.Warning, "Couldn't use what was dropped", ex.Message);
-        }
-    }
-
-    /// <summary>A folder becomes the save folder, a .txt file adds its links, another file is one to continue.</summary>
-    void Use(string text)
-    {
-        text = text.Trim().Trim('"');
-        if (text.Length == 0) return;
-        if (Directory.Exists(text))
-            SaveToBox.Text = text;
-        else if (File.Exists(text))
-        {
-            if (text.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)) AppendLinks(File.ReadAllText(text));
-            else AppendPart(text);
-        }
-        else
-            AppendLinks(text);
-    }
-
-    /// <summary>Adds an unfinished file to continue, on a line of its own, unless it is there already.</summary>
-    void AppendPart(string path)
-    {
-        var lines = PartBox.Text.Split('\r', '\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
-        if (!lines.Contains(path, StringComparer.OrdinalIgnoreCase)) lines.Add(path);
-        PartBox.Text = string.Join("\r", lines);
-    }
-
-    void AppendLinks(string text)
-    {
-        text = text.Trim();
-        if (text.Length == 0) return;
-        LinksBox.Text = LinksBox.Text.Trim().Length == 0 ? text : LinksBox.Text.TrimEnd() + "\r" + text;
+        if (path == null) return;
+        if (File.Exists(path)) Process.Start("explorer.exe", $"/select,\"{path}\"");
+        else if (Path.GetDirectoryName(path) is { } dir && Directory.Exists(dir)) Process.Start("explorer.exe", $"\"{dir}\"");
     }
 
     /// <summary>A comfortable size that still fits on the screen, centered.</summary>
@@ -435,8 +224,8 @@ public sealed partial class MainWindow : Window
     {
         double scale = GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96.0;
         var area = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary).WorkArea;
-        int width = (int)Math.Min(1120 * scale, area.Width * 0.95);
-        int height = (int)Math.Min(980 * scale, area.Height * 0.95);
+        int width = (int)Math.Min(1180 * scale, area.Width * 0.95);
+        int height = (int)Math.Min(1000 * scale, area.Height * 0.95);
         AppWindow.MoveAndResize(new RectInt32(area.X + (area.Width - width) / 2, area.Y + (area.Height - height) / 2, width, height));
     }
 

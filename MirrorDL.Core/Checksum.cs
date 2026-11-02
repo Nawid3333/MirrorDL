@@ -26,12 +26,15 @@ public static class Checksum
         return Algorithm(hex) != null && hex.All(char.IsAsciiHexDigit);
     }
 
-    /// <summary>Reads the file once and computes every expected checksum; reports (bytes read, total) as it goes.</summary>
+    /// <summary>
+    /// Reads the file once and computes every expected checksum - each algorithm once, however many checksums of it
+    /// are given; reports (bytes read, total) as it goes.
+    /// </summary>
     public static async Task<List<(string Algorithm, string Expected, string Actual)>> ComputeAsync(
         string path, IReadOnlyList<string> expected, Action<long, long> progress, CancellationToken ct)
     {
-        var checks = expected.Select(hex => (Expected: hex, Algorithm: Algorithm(hex)!.Value))
-            .Select(c => (c.Expected, c.Algorithm, Hash: IncrementalHash.CreateHash(c.Algorithm))).ToList();
+        var checks = expected.Select(hex => Algorithm(hex)!.Value).Distinct()
+            .Select(algorithm => (Algorithm: algorithm, Hash: IncrementalHash.CreateHash(algorithm))).ToList();
         var buffer = new byte[4 << 20];
         await using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1,
                          FileOptions.Asynchronous | FileOptions.SequentialScan))
@@ -45,12 +48,12 @@ public static class Checksum
                 progress(done, length);
             }
         }
-        var results = new List<(string, string, string)>();
+        var actual = new Dictionary<HashAlgorithmName, string>();
         foreach (var c in checks)
         {
-            results.Add((c.Algorithm.Name!, c.Expected, Convert.ToHexStringLower(c.Hash.GetHashAndReset())));
+            actual[c.Algorithm] = Convert.ToHexStringLower(c.Hash.GetHashAndReset());
             c.Hash.Dispose();
         }
-        return results;
+        return [.. expected.Select(hex => (Algorithm(hex)!.Value.Name!, hex, actual[Algorithm(hex)!.Value]))];
     }
 }

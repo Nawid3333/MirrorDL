@@ -18,6 +18,7 @@ sealed class Download : IDisposable
     public FakeServer Server { get; } = new();
     public Job Job { get; } = new();
     public Session Session { get; private set; } = null!;
+    public Batch Batch { get; private set; } = null!;
     public List<string> Log { get; } = [];
     public List<string> Recycled { get; } = [];
     public List<string> Questions { get; } = [];
@@ -70,6 +71,37 @@ sealed class Download : IDisposable
         Session.Log += (text, _) => { lock (Log) Log.Add(text); };
         Session.PhaseChanged += phase => OnPhase?.Invoke(phase);
         return await Session.RunAsync(ct);
+    }
+
+    /// <summary>
+    /// Runs the job as a <see cref="MirrorDL.Batch"/>: a new one, or - with <paramref name="again"/> - the one run
+    /// before, or one saved before (as MirrorDL does after a restart). Cancelling <paramref name="pause"/> pauses it.
+    /// </summary>
+    public async Task<int> RunBatchAsync(CancellationTokenSource? pause = null, bool again = false, SavedBatch? saved = null)
+    {
+        if (saved != null) Batch = Batch.FromSaved(saved);
+        else if (!again) Batch = new Batch(Job);
+        Batch.Handler = Server;
+        Batch.Recycle = MoveToBin;
+        Batch.ConfirmAsync = (_, question) =>
+        {
+            lock (Questions) Questions.Add(question);
+            return Task.FromResult(Answer);
+        };
+        if (!again || saved != null)
+        {
+            Batch.Log += (file, text, _) => { lock (Log) Log.Add(file == null ? text : $"[{file.Number}] {text}"); };
+            Batch.PhaseChanged += (_, phase) => OnPhase?.Invoke(phase);
+        }
+        using var both = CancellationTokenSource.CreateLinkedTokenSource(pause?.Token ?? CancellationToken.None, TestContext.Current.CancellationToken);
+        try
+        {
+            return await Batch.RunAsync(both.Token);
+        }
+        finally
+        {
+            Batch.Release(); // the names it claimed are free for the next test
+        }
     }
 
     Native.Recycled MoveToBin(string path)
