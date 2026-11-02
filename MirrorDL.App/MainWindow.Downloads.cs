@@ -119,7 +119,12 @@ public sealed partial class MainWindow
         UpdateList();
         if (_runs.Any(r => r.IsRunning)) return;
         if (_closing) Close();
-        else if (_settings.FlashWhenDone) WindowsShell.Flash(_hwnd);
+        else
+        {
+            if (_settings.FlashWhenDone) WindowsShell.Flash(_hwnd);
+            // A run that ended by itself (a Pause would have cancelled it): the "When done" choice counts.
+            if (!cts.IsCancellationRequested) StartWhenDone();
+        }
     }
 
     void RowPause_Click(object sender, RoutedEventArgs e)
