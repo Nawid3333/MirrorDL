@@ -66,8 +66,10 @@ public sealed partial class MainWindow
         Toggle("Open download pages in MirrorDL's browser",
             "A web page whose download button needs a captcha or a click opens in a window of MirrorDL: solve the captcha, click the " +
             "button, and MirrorDL takes the link - the page's own download doesn't happen. Its cookies are kept in MirrorDL's folder " +
-            "on this PC. Off: such pages open in your usual browser, and you copy the link from there.",
-            () => _settings.Browser, v => _settings.Browser = v);
+            "on this PC. The Browser button opens this browser any time, for any page: a download a page starts there goes to " +
+            "MirrorDL. Off: such pages open in your usual browser, and you copy the link from there.",
+            () => _settings.Browser, v => _settings.Browser = v, ApplyBrowser);
+        ApplyBrowser();
         ButtonCard(" ", "Clear the browser's cookies and data", "Signs you out of the sites opened in MirrorDL's browser.", ClearBrowserData);
         Toggle("Watch the clipboard for links",
             "Links you copy anywhere are put into the new download's boxes, ready to be checked. Nothing is downloaded by itself.",
@@ -223,6 +225,9 @@ public sealed partial class MainWindow
                 : _cnl != null ? $"Listening on port {_cnl.Port}."
                 : $"Port {ClickNLoad.DefaultPort} is used by another program (JDownloader?), so MirrorDL can't take links from Click'n'Load now. Close it and switch this off and on.";
     }
+
+    /// <summary>The Browser button in the new download is there as long as MirrorDL's browser is on.</summary>
+    void ApplyBrowser() => OpenBrowserButton.Visibility = _settings.Browser ? Visibility.Visible : Visibility.Collapsed;
 
     void ApplyClipboard()
     {

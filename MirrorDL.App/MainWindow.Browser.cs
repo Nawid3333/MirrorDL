@@ -7,7 +7,7 @@ using Microsoft.UI.Xaml.Controls;
 
 namespace MirrorDL.App;
 
-/// <summary>Download pages that need the user: opened in MirrorDL's browser (or the usual one), the link taken from there.</summary>
+/// <summary>Download pages that need the user, opened in MirrorDL's browser (or the usual one); and the general browser, opened any time.</summary>
 public sealed partial class MainWindow
 {
     readonly List<BrowserWindow> _browsers = [];
@@ -30,7 +30,16 @@ public sealed partial class MainWindow
             return;
         }
         var browser = new BrowserWindow(page);
-        browser.LinkTaken += link => TakeLinks([link.ToString()], page.Host, check: true);
+        browser.LinkTaken += link => TakeLinks([link.ToString()], page.Host, check: true, start: !_settings.Review);
+        browser.Closed += (_, _) => _browsers.Remove(browser);
+        _browsers.Add(browser);
+        browser.Activate();
+    }
+
+    void OpenBrowser_Click(object sender, RoutedEventArgs e)
+    {
+        var browser = new BrowserWindow(null);
+        browser.LinkTaken += link => TakeLinks([link.ToString()], "MirrorDL's browser", check: true, start: !_settings.Review);
         browser.Closed += (_, _) => _browsers.Remove(browser);
         _browsers.Add(browser);
         browser.Activate();
