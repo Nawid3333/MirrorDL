@@ -34,7 +34,11 @@ sealed class BrowserWindow : Window
         var back = IconButton("", "Back", () => { if (_web.CanGoBack) _web.GoBack(); });
         var reload = IconButton("", "Reload", () => _web.Reload());
         var outside = new Button { Content = "Open in my browser" };
-        outside.Click += (_, _) => Process.Start(new ProcessStartInfo((_web.Source ?? _start).ToString()) { UseShellExecute = true });
+        outside.Click += (_, _) =>
+        {
+            try { Process.Start(new ProcessStartInfo((_web.Source ?? _start).ToString()) { UseShellExecute = true }); }
+            catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException) { _info.Message = e.Message; }
+        };
         _address.KeyDown += (_, e) =>
         {
             if (e.Key == Windows.System.VirtualKey.Enter && Uri.TryCreate(_address.Text.Trim(), UriKind.Absolute, out var uri)
@@ -93,7 +97,8 @@ sealed class BrowserWindow : Window
             core.NewWindowRequested += (_, e) =>
             {
                 e.Handled = true;
-                core.Navigate(e.Uri);
+                if (Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+                    core.Navigate(uri.AbsoluteUri);
             };
             core.SourceChanged += (_, _) => _address.Text = core.Source;
             _web.Source = _start;

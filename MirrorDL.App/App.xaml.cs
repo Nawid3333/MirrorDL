@@ -16,7 +16,16 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        _window = new MainWindow();
-        _window.Activate();
+        // MirrorDL runs already: it takes what this start was given, and comes to the front.
+        string[] given = [.. Environment.GetCommandLineArgs().Skip(1)];
+        if (SingleInstance.HandOver(given))
+        {
+            Exit();
+            return;
+        }
+        var window = new MainWindow(given);
+        _window = window;
+        SingleInstance.Listen(more => window.DispatcherQueue.TryEnqueue(() => window.Take(more)));
+        window.Activate();
     }
 }

@@ -31,7 +31,10 @@ Firefox or aria2 left behind. It runs on Windows 10 and 11, as a window app and 
   like filecrypt, as JDownloader does.
 - **History and settings.** Finished downloads are listed, searchable, with their links. Every
   extra - the history, keeping the list, Click'n'Load, watching the clipboard, keeping the PC
-  awake, the taskbar progress - is a switch in Settings, with what it does.
+  awake, the taskbar progress - is a switch in Settings, with what it does. The theme follows
+  Windows, or is light, dark or **OLED black** (a pure black window).
+- **One window.** Starting MirrorDL again, or dropping files on MirrorDL.exe, hands them to the
+  window that is open.
 - **All links at once.** Each link gets several connections. Faster links keep taking over work
   from slower ones until the end.
 - **Finds the best number of connections by itself.** It adds connections to a link as long as

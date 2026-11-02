@@ -84,7 +84,6 @@ static class Ui
     public static void PrintFiles(IReadOnlyList<BatchFile> files)
     {
         Console.WriteLine();
-        Console.WriteLine($"The links lead to {files.Count} files:");
         foreach (var f in files)
         {
             string links = string.Join(" ", f.Links.Select(m => $"#{m.Index}"));
@@ -98,35 +97,43 @@ static class Ui
     /// <summary>A line above the messages of a file.</summary>
     public static void FileHeader(BatchFile file, int count)
     {
-        string title = $"── File {file.Number} of {count}: {file.Name} ";
+        string title = $"── File {file.Number} of {count}: {Format.Clip(file.Name, 56)} ";
         Console.WriteLine();
         Line(title + new string('─', Math.Max(3, 76 - title.Length)), ConsoleColor.Cyan);
     }
 
-    /// <summary>How far all files are: done ones in full, the one being downloaded as far as it got.</summary>
+    /// <summary>
+    /// How far all files are: done ones in full, the one being downloaded as far as it got, the others as far as they
+    /// got before (paused or failed). A percent and the time left only when every size is known.
+    /// </summary>
     public static string BatchLine(IReadOnlyList<BatchFile> files, BatchFile current, Status status)
     {
-        long total = files.Sum(f => f.Size ?? 0);
-        long done = files.Where(f => f.IsFinished).Sum(f => f.Size ?? 0) + status.Have;
+        long done = files.Sum(f => f == current ? status.Have : f.IsFinished ? f.Size ?? 0 : f.Have ?? 0);
         int finished = files.Count(f => f.IsFinished);
-        string all = total > 0 ? $"{Format.Percent(done * 100.0 / total)} - {Format.Bytes(done)} of {Format.Bytes(total)}" : "";
-        string left = status.Speed > 0 && total > done ? $" - about {Format.Duration((total - done) / status.Speed)} left" : "";
-        return $"File {current.Number} of {files.Count} ({finished} done)   all: {all}{left}";
+        string all = Format.Bytes(done);
+        if (files.All(f => f.Size != null) && files.Sum(f => f.Size!.Value) is long total and > 0)
+        {
+            all = $"{Format.Percent(Math.Min(100, done * 100.0 / total))} - {Format.Bytes(done)} of {Format.Bytes(total)}";
+            if (status.Speed > 0 && total > done) all += $" - about {Format.Duration((total - done) / status.Speed)} left";
+        }
+        return $"File {current.Number} of {files.Count} ({finished} done)   all: {all}";
     }
 
     /// <summary>How each file went.</summary>
     public static void PrintSummary(IReadOnlyList<BatchFile> files)
     {
         Console.WriteLine();
-        Console.WriteLine(Batch.Summary(files.Where(f => f.State != FileState.Removed).ToList()));
         foreach (var f in files.Where(f => f.State != FileState.Removed))
         {
             var (mark, color, text) = f.State switch
             {
+                // Checksums were pasted for several files and this one matched none: maybe damaged, maybe not its own.
+                FileState.Done when f.Job.ChecksumsOfSeveral && f.ChecksumMatched == null =>
+                    ("??", ConsoleColor.Yellow, "saved, but it matches none of the checksums: " + f.SavedPath),
                 FileState.Done => ("ok", ConsoleColor.Green, f.SavedPath ?? ""),
                 FileState.Checked => ("ok", ConsoleColor.Green, "there already: " + f.SavedPath),
                 FileState.Mismatch => ("!!", ConsoleColor.Yellow, "doesn't match: " + f.SavedPath),
-                FileState.Paused => ("..", ConsoleColor.Yellow, "paused"),
+                FileState.Paused => ("..", ConsoleColor.Yellow, f.Have is > 0 and long have ? $"paused at {Format.Bytes(have)}" : "paused"),
                 FileState.Failed => ("xx", ConsoleColor.Red, f.Message ?? "failed"),
                 _ => ("..", ConsoleColor.DarkGray, "not started"),
             };

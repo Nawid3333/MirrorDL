@@ -27,6 +27,8 @@ sealed class Settings
     // Window
     public bool TaskbarProgress { get; set; } = true;
     public bool FlashWhenDone { get; set; } = true;
+    /// <summary>System, Light, Dark or Black (OLED black).</summary>
+    public string Theme { get; set; } = "System";
     // What is kept
     public bool KeepList { get; set; } = true;
     public bool ResumeAtStart { get; set; }
@@ -53,21 +55,44 @@ static class Storage
 
     public static string Folder { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MirrorDL");
 
+    // Files that were there but couldn't be read: not written over this time, so that nothing in them is lost.
+    static readonly HashSet<string> Unread = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The file's content; null if there is none or it can't be read. One that is in use (a virus scanner, a backup)
+    /// is tried again; one still in use is left alone until next time; a damaged one is kept beside as ".unreadable".
+    /// </summary>
     public static T? Read<T>(string name) where T : class
     {
-        try
+        string path = Path.Combine(Folder, name);
+        for (int attempt = 1; ; attempt++)
         {
-            string path = Path.Combine(Folder, name);
-            return File.Exists(path) ? JsonSerializer.Deserialize<T>(File.ReadAllText(path), Options) : null;
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or NotSupportedException)
-        {
-            return null; // damaged or unreadable: started anew rather than not at all
+            try
+            {
+                return File.Exists(path) ? JsonSerializer.Deserialize<T>(File.ReadAllText(path), Options) : null;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                if (attempt < 5)
+                {
+                    Thread.Sleep(200);
+                    continue;
+                }
+                Unread.Add(name);
+                return null;
+            }
+            catch (Exception e) when (e is JsonException or NotSupportedException)
+            {
+                try { File.Move(path, path + ".unreadable", overwrite: true); }
+                catch (Exception moving) when (moving is IOException or UnauthorizedAccessException) { Unread.Add(name); }
+                return null;
+            }
         }
     }
 
     public static void Write<T>(string name, T value)
     {
+        if (Unread.Contains(name)) return;
         try
         {
             Directory.CreateDirectory(Folder);
@@ -83,6 +108,7 @@ static class Storage
 
     public static void Delete(string name)
     {
+        Unread.Remove(name); // the user cleared it: nothing in it is to be kept
         try { File.Delete(Path.Combine(Folder, name)); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }

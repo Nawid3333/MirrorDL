@@ -23,7 +23,7 @@ public sealed partial class MainWindow
         if (page == null) return;
         if (!_settings.Browser)
         {
-            Process.Start(new ProcessStartInfo(page.ToString()) { UseShellExecute = true });
+            Open(page.ToString());
             ShowNotice(InfoBarSeverity.Informational, "Opened in your browser",
                 "Click the page's download button there, copy the link of the download (in Firefox: right-click it in the downloads list, " +
                 "Copy Download Link) and paste it into a box above.");

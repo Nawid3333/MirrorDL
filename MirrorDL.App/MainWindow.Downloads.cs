@@ -93,6 +93,13 @@ public sealed partial class MainWindow
     async void StartRun(Run run)
     {
         if (run.IsRunning || _closing) return;
+        // The settings as they are now, also for a download checked or saved before they changed.
+        foreach (var file in run.Batch.Files)
+        {
+            file.Job.DeleteLeftovers = _settings.DeleteLeftovers;
+            file.Job.Connections = _settings.Connections;
+            file.Job.PerServer = _settings.PerLink;
+        }
         var cts = run.Cts = new CancellationTokenSource();
         run.Task = Task.Run(() => run.Batch.RunAsync(cts.Token));
         foreach (var row in run.Rows) row.Update();
@@ -105,7 +112,8 @@ public sealed partial class MainWindow
         {
             run.Log.Add(new LogLine("Unexpected error: " + ex, Brushes.Critical));
         }
-        run.Cts = null;
+        if (run.Cts == cts) run.Cts = null; // not a newer start's, after a quick Resume
+        if (_shutDown) return;
         foreach (var row in run.Rows) row.Update();
         SaveList();
         UpdateList();
@@ -196,6 +204,7 @@ public sealed partial class MainWindow
     /// <summary>Every half second: the numbers of what downloads, the list, the selected download, the taskbar.</summary>
     void Refresh()
     {
+        if (_shutDown) return;
         foreach (var run in _runs.Where(r => r.IsRunning))
             if (run.Batch.Current is { Session: { } session } file && run.RowOf(file) is { } row)
                 row.Status = session.GetStatus(); // the one place that reads it while it runs: it also measures the speed

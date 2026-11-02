@@ -6,10 +6,7 @@
     xmlns:local="using:MirrorDL.App"
     Title="MirrorDL">
 
-    <Window.SystemBackdrop>
-        <MicaBackdrop />
-    </Window.SystemBackdrop>
-
+    <!-- The backdrop (Mica, or none for OLED black) is set in MainWindow.Theme.cs. -->
     <Grid x:Name="Root" AllowDrop="True" DragOver="Root_DragOver" Drop="Root_Drop">
         <Grid.Resources>
             <Style x:Key="Card" TargetType="Border">

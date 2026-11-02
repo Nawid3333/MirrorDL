@@ -103,7 +103,7 @@ public sealed class BatchFile
     internal void End(int code, string? error = null)
     {
         var session = _session!;
-        Have = session.GetStatus().Have; // it ended: no one else reads its numbers now
+        Have = session.Have().Have; // not GetStatus: the window may be reading the numbers at the same moment
         SavedPath = session.SavedPath;
         ChecksumMatched = session.ChecksumMatched;
         CheckedOnly = session.CheckedOnly;
@@ -215,7 +215,9 @@ public sealed class Batch
                 if (file.State == FileState.Paused) break;
             }
             var files = Files.Where(f => f.State != FileState.Removed).ToList();
-            if (files.Count > 1) Write(null, Summary(files), files.All(f => f.State is FileState.Done or FileState.Checked) ? LogKind.Ok : LogKind.Warn);
+            if (files.Count > 1)
+                Write(null, Summary(files), files.All(f => f.State is FileState.Done or FileState.Checked) ? LogKind.Ok
+                    : files.Any(f => f.State is FileState.Failed or FileState.Mismatch) ? LogKind.Warn : LogKind.Info);
             if (files.All(f => f.IsFinished))
             {
                 Unmatched(files);
@@ -274,6 +276,11 @@ public sealed class Batch
             if (file.State == FileState.Running) return false;
             file.State = FileState.Removed;
         }
+        lock (Claims)
+        {
+            string key = Path.Combine(SaveDir(file.Job, file.Job.PartFiles), file.Name);
+            if (Claims.TryGetValue(key, out var owner) && owner == this) Claims.Remove(key);
+        }
         if (Files.All(f => f.IsFinished || f.State == FileState.Removed)) Release();
         return true;
     }
@@ -293,7 +300,8 @@ public sealed class Batch
         void Add(int n, string what) { if (n > 0) parts.Add($"{n} {what}"); }
         Add(files.Count(f => f.State == FileState.Done), "saved");
         Add(files.Count(f => f.State == FileState.Checked), "there already");
-        Add(files.Count(f => f.State == FileState.Mismatch), "don't match");
+        int mismatch = files.Count(f => f.State == FileState.Mismatch);
+        Add(mismatch, mismatch == 1 ? "doesn't match" : "don't match");
         Add(files.Count(f => f.State == FileState.Failed), "failed");
         Add(files.Count(f => f.State == FileState.Paused), "paused");
         Add(files.Count(f => f.State is FileState.Waiting or FileState.Running), "waiting");
@@ -352,7 +360,9 @@ public sealed class Batch
     {
         Write(null, $"Checking {Format.Plural(_mirrors.Count, "link")}...");
         await Mirror.InspectAllAsync(http, _mirrors, ct);
+        ct.ThrowIfCancellationRequested(); // a server that answered after the cancel: the links aren't all known
         if (Job.LookIntoPages) await LookIntoPagesAsync(http, ct);
+        ct.ThrowIfCancellationRequested();
         // A page whose links were found isn't a file of its own; the links are.
         var links = _mirrors.Where(m => !(m.IsPage && _mirrors.Any(f => f.FoundOn == m.Url))).ToList();
         var groups = Job.OneFile ? [links] : await GroupAsync(http, links, ct);
@@ -386,11 +396,11 @@ public sealed class Batch
             if (files.Count == 0)
             {
                 page.Problem = "a web page with no link to a file on it that MirrorDL can see: open it in the browser";
-                Write(null, $"{page.Url} is a web page, and no link to a file can be seen on it: one that only appears after a " +
-                            "captcha or a click can't. Open the page in the browser and click its download button there.", LogKind.Warn);
+                Write(null, $"{page.Url} is a web page, and no link to a file can be seen on it - a link that only appears after a " +
+                            "captcha or a click can't be. Open the page in a browser and click its download button there.", LogKind.Warn);
                 continue;
             }
-            page.Problem = $"a web page: {Format.Plural(files.Count, "link")} to files found on it";
+            page.Problem = files.Count == 1 ? "a web page: a link to a file found on it" : $"a web page: {files.Count} links to files found on it";
             Write(null, $"Found on {page.Url.Host}: " + string.Join(", ", files.Select(m => m.FileName)), LogKind.Ok);
             found.AddRange(files);
         }
@@ -401,8 +411,9 @@ public sealed class Batch
         }
     }
 
-    static string PageMessage(BatchFile file) =>
-        $"{file.Links[0].Url} is a web page; no link to a file can be seen on it. Open it in the browser and click its download button there.";
+    string PageMessage(BatchFile file) => Job.LookIntoPages
+        ? $"{file.Links[0].Url} is a web page; no link to a file can be seen on it. Open it in a browser and click its download button there."
+        : $"{file.Links[0].Url} is a web page, not a file; pages aren't searched for links to files now. Open it in a browser and take the link from there.";
 
     /// <summary>A web page's text, at most 4 MB of it; null if it can't be had.</summary>
     static async Task<string?> ReadPageAsync(HttpClient http, Uri url, CancellationToken ct)

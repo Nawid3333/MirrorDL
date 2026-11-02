@@ -23,13 +23,13 @@ public sealed partial class MainWindow : Window
     readonly DispatcherQueueTimer _timer;
     readonly IntPtr _hwnd;
     Uri? _updatePage;
-    bool _closing;
+    bool _closing, _shutDown;
     // Questions of the downloads, one at a time: WinUI shows only one dialog at once.
     readonly SemaphoreSlim _questions = new(1);
     ContentDialog? _question;
     Run? _questionRun;
 
-    public MainWindow()
+    public MainWindow(string[] args)
     {
         InitializeComponent();
         ExtendsContentIntoTitleBar = true;
@@ -49,7 +49,9 @@ public sealed partial class MainWindow : Window
         _timer.Tick += (_, _) => Refresh();
         _timer.Start();
         AppWindow.Closing += AppWindow_Closing;
+        Closed += (_, _) => ShutDown();
 
+        ApplyTheme();
         BuildSettings();
         LoadHistory();
         RestoreList();
@@ -57,8 +59,22 @@ public sealed partial class MainWindow : Window
         ApplyClipboard();
         if (!Native.IsPackaged() && _settings.CheckForUpdates) _ = CheckForUpdateAsync();
 
-        // Files dropped on MirrorDL.exe, or links passed on the command line; --start starts right away.
-        var args = Environment.GetCommandLineArgs().Skip(1).ToList();
+        if (args.Contains("--start"))
+            Root.Loaded += (_, _) => Take(args);
+        else
+        {
+            Take(args);
+            if (_settings.ResumeAtStart) Root.Loaded += (_, _) => ResumeAll_Click(this, new RoutedEventArgs());
+        }
+    }
+
+    /// <summary>
+    /// Files dropped on MirrorDL.exe, or links passed on the command line - at start, or by a later start that handed
+    /// them over (<see cref="SingleInstance"/>); --start checks them and starts right away. Brings the window to the front.
+    /// </summary>
+    public void Take(IReadOnlyList<string> args)
+    {
+        if (_shutDown) return;
         foreach (string arg in args.Where(a => a != "--start"))
         {
             // A .txt file that can't be read (in use, only in the cloud) must not keep the window from opening.
@@ -68,10 +84,9 @@ public sealed partial class MainWindow : Window
                 ShowNotice(InfoBarSeverity.Warning, "Couldn't use what was given", $"{arg}: {ex.Message}");
             }
         }
-        if (args.Contains("--start"))
-            Root.Loaded += async (_, _) => await CheckAsync(start: true);
-        else if (_settings.ResumeAtStart)
-            Root.Loaded += (_, _) => ResumeAll_Click(this, new RoutedEventArgs());
+        if (AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } presenter) presenter.Restore();
+        Activate();
+        if (args.Contains("--start")) _ = CheckAsync(start: true);
     }
 
     void Nav_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
@@ -104,7 +119,20 @@ public sealed partial class MainWindow : Window
 
     void DownloadUpdate_Click(object sender, RoutedEventArgs e)
     {
-        if (_updatePage != null) Process.Start(new ProcessStartInfo(_updatePage.ToString()) { UseShellExecute = true });
+        if (_updatePage != null) Open(_updatePage.ToString());
+    }
+
+    /// <summary>Opens a file or web page with the program Windows has for it; says so if there is none.</summary>
+    void Open(string target)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
+        }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException or FileNotFoundException)
+        {
+            ShowNotice(InfoBarSeverity.Warning, "Couldn't open it", $"{target}: {e.Message}");
+        }
     }
 
     /// <summary>Closing while downloads run pauses them first, so their progress is saved; the list is kept for next time.</summary>
@@ -117,8 +145,18 @@ public sealed partial class MainWindow : Window
             args.Cancel = true;
             _closing = true;
             PauseAll_Click(this, new RoutedEventArgs());
-            return;
         }
+    }
+
+    /// <summary>
+    /// Once the window is closed - by the user, or by MirrorDL after pausing: nothing of it may run on. Window.Close()
+    /// doesn't raise AppWindow.Closing, so this is on Closed.
+    /// </summary>
+    void ShutDown()
+    {
+        if (_shutDown) return;
+        _shutDown = true;
+        _closing = true;
         SaveList();
         _timer.Stop();
         _cnl?.Dispose();
@@ -138,7 +176,7 @@ public sealed partial class MainWindow : Window
             bool waited = false;
             try
             {
-                await _questions.WaitAsync();
+                await _questions.WaitAsync(run.Cts?.Token ?? new CancellationToken(canceled: true));
                 waited = true;
                 if (run.Cts?.IsCancellationRequested != false || _closing)
                 {

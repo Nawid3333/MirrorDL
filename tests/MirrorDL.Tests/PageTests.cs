@@ -68,7 +68,7 @@ public class PageTests
         Assert.Equal("game.rar", file.Name);
         Assert.Equal(new Uri("http://mirror1.test/f/xyz"), file.Links[0].FoundOn);
         Assert.Equal(2, file.Links[0].Index); // after the pasted page
-        Assert.Contains("a web page: 1 link to files found on it", d.Batch.Mirrors[0].Problem);
+        Assert.Equal("a web page: a link to a file found on it", d.Batch.Mirrors[0].Problem);
         Assert.Equal(content, File.ReadAllBytes(d.PathOf("game.rar")));
     }
 
@@ -84,7 +84,7 @@ public class PageTests
         var file = Assert.Single(d.Batch.Files);
         Assert.True(file.IsPage);
         Assert.Equal(FileState.Failed, file.State);
-        Assert.Contains("Open it in the browser", file.Message);
+        Assert.Contains("Open it in a browser", file.Message);
         Assert.Empty(d.Files);
         Assert.Equal(2, page.Requests); // looked at, read once - not downloaded
     }
@@ -131,6 +131,25 @@ public class PageTests
         Assert.Equal(["http://a.example/x.rar"], got);
         Assert.Equal("https://links.example/c/1", from);
         Assert.Null(ClickNLoad.Start(server.Port)); // taken: a second one can't listen there
+    }
+
+    [Fact]
+    public async Task ClickNLoad_says_failed_when_it_can_read_no_links()
+    {
+        using var server = ClickNLoad.Start(0);
+        Assert.NotNull(server);
+        bool received = false;
+        server.Received += (_, _) => received = true;
+        using var http = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{server.Port}") };
+        var ct = TestContext.Current.CancellationToken;
+
+        var answer = await http.PostAsync("/flash/addcrypted2", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["jk"] = "function f(){ return compute(); }", ["crypted"] = "AAAA",
+        }), ct);
+
+        Assert.Equal("failed", (await answer.Content.ReadAsStringAsync(ct)).Trim());
+        Assert.False(received);
     }
 
     [Fact]

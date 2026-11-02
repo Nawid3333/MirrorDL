@@ -74,6 +74,10 @@ public sealed partial class MainWindow
             () => _settings.WatchClipboard, v => _settings.WatchClipboard = v, ApplyClipboard);
 
         Section("Window");
+        Choice("Theme",
+            "As Windows follows the light or dark mode of Windows. OLED black is a pure black window: on an OLED screen black pixels " +
+            "are switched off, which saves power and avoids burn-in; the cards stay just above black so that they still stand out.",
+            Themes, () => _settings.Theme, v => _settings.Theme = v, ApplyTheme);
         Toggle("Show the progress on the taskbar button",
             "The taskbar button of MirrorDL fills up as the downloads go, so you see it without opening the window.",
             () => _settings.TaskbarProgress, v => _settings.TaskbarProgress = v);
@@ -156,6 +160,21 @@ public sealed partial class MainWindow
         var state = new TextBlock { Style = (Style)Root.Resources["Help"] };
         text.Children.Add(state);
         return state;
+    }
+
+    void Choice(string title, string help, (string Key, string Name)[] options, Func<string> get, Action<string> set, Action after)
+    {
+        var box = new ComboBox { MinWidth = 150 };
+        foreach (var (_, name) in options) box.Items.Add(name);
+        box.SelectedIndex = Math.Max(0, Array.FindIndex(options, o => o.Key == get()));
+        box.SelectionChanged += (_, _) =>
+        {
+            if (box.SelectedIndex < 0) return;
+            set(options[box.SelectedIndex].Key);
+            _settings.Save();
+            after();
+        };
+        Card(title, help, box);
     }
 
     void Number(string title, string help, Func<int?> get, Action<int?> set)

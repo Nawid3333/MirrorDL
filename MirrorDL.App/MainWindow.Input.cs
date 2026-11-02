@@ -19,6 +19,7 @@ public sealed partial class MainWindow
 
     Run? _review;                 // the links being checked, or checked and shown
     CancellationTokenSource? _reviewCts;
+    List<EntryRow> _checkedEntries = []; // the boxes the check took, emptied once their files download
 
     ObservableCollection<EntryRow> ListOf(EntryKind kind) => kind switch
     {
@@ -78,8 +79,16 @@ public sealed partial class MainWindow
     async void Entry_Paste(object sender, TextControlPasteEventArgs e)
     {
         if (sender is not TextBox box || box.DataContext is not EntryRow row) return;
-        var content = Clipboard.GetContent();
-        if (!content.Contains(StandardDataFormats.Text)) return;
+        DataPackageView content;
+        try
+        {
+            content = Clipboard.GetContent();
+            if (!content.Contains(StandardDataFormats.Text)) return;
+        }
+        catch (Exception)
+        {
+            return; // another program holds the clipboard: the box pastes as it would
+        }
         e.Handled = true; // before the first await: the box doesn't paste it itself
         try
         {
@@ -123,6 +132,7 @@ public sealed partial class MainWindow
     {
         int links = 0, checksums = 0, files = 0;
         var ignored = new List<string>();
+        var lists = new HashSet<string>(StringComparer.OrdinalIgnoreCase); // .txt files read already
         void Use(string raw)
         {
             foreach (string full in raw.Split('\r', '\n'))
@@ -141,7 +151,10 @@ public sealed partial class MainWindow
                 }
                 if (IsFile(line))
                 {
-                    if (line.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)) Use(File.ReadAllText(line));
+                    if (line.EndsWith(".txt", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (lists.Add(Path.GetFullPath(line)) && lists.Count <= 100) Use(File.ReadAllText(line));
+                    }
                     else if (AddEntry(EntryKind.Unfinished, Path.GetFullPath(line))) files++;
                     continue;
                 }
@@ -187,18 +200,32 @@ public sealed partial class MainWindow
 
     async void BrowseFolder_Click(object sender, RoutedEventArgs e)
     {
-        var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.Downloads };
-        picker.FileTypeFilter.Add("*");
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, _hwnd);
-        if (await picker.PickSingleFolderAsync() is { } folder) SaveToBox.Text = folder.Path;
+        try
+        {
+            var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.Downloads };
+            picker.FileTypeFilter.Add("*");
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, _hwnd);
+            if (await picker.PickSingleFolderAsync() is { } folder) SaveToBox.Text = folder.Path;
+        }
+        catch (Exception ex)
+        {
+            ShowNotice(InfoBarSeverity.Warning, "Couldn't open the folder picker", ex.Message + " Type or paste the folder instead.");
+        }
     }
 
     async void BrowsePart_Click(object sender, RoutedEventArgs e)
     {
-        var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.Downloads };
-        foreach (string type in new[] { ".part", ".aria2", ".mirrordl", "*" }) picker.FileTypeFilter.Add(type);
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, _hwnd);
-        foreach (var file in await picker.PickMultipleFilesAsync()) AddEntry(EntryKind.Unfinished, file.Path);
+        try
+        {
+            var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.Downloads };
+            foreach (string type in new[] { ".part", ".aria2", ".mirrordl", "*" }) picker.FileTypeFilter.Add(type);
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, _hwnd);
+            foreach (var file in await picker.PickMultipleFilesAsync()) AddEntry(EntryKind.Unfinished, file.Path);
+        }
+        catch (Exception ex)
+        {
+            ShowNotice(InfoBarSeverity.Warning, "Couldn't open the file picker", ex.Message + " Paste the path or drop the file instead.");
+        }
     }
 
     void Root_DragOver(object sender, DragEventArgs e)
@@ -245,6 +272,7 @@ public sealed partial class MainWindow
             LookIntoPages = _settings.LookIntoPages,
         };
         var ignored = new List<string>();
+        _checkedEntries = [.. LinkEntries.Concat(ChecksumEntries).Concat(PartEntries).Where(e => e.Text.Trim().Length > 0)];
         foreach (var entry in LinkEntries.Concat(ChecksumEntries)) Input.Add(entry.Text, job, ignored, allowFiles: false);
         foreach (var entry in PartEntries)
         {
@@ -273,7 +301,9 @@ public sealed partial class MainWindow
             return null;
         }
         // A link being downloaded already would only end up as a second copy - or find its file in use.
-        var busy = job.Urls.Where(u => _runs.Any(r => r.Batch.Files.Any(f => !f.IsFinished && f.State != FileState.Removed && f.Job.Urls.Contains(u)))).ToList();
+        var busy = job.Urls.Where(u => _runs.Any(r => r.Batch.Files.Any(f => !f.IsFinished && f.State != FileState.Removed && f.Job.Urls.Contains(u))
+                                                      || r.Batch.Job.Urls.Contains(u) && r.Batch.Files.Any(f => !f.IsFinished && f.State != FileState.Removed)))
+            .ToList();
         if (busy.Count == job.Urls.Count)
         {
             ShowNotice(InfoBarSeverity.Informational, "In the download list already", "These links are in the list below: resume them there.");
@@ -293,6 +323,8 @@ public sealed partial class MainWindow
     async Task CheckAsync(bool start)
     {
         if (NewJob() is not { } job) return;
+        // Links whose files the user unticked in the review this one replaces stay unticked.
+        var unticked = ReviewRows.Where(r => !r.IsSelected).SelectMany(r => r.File.Job.Urls).ToHashSet();
         CancelReview();
         var run = NewRun(new Batch(job));
         _review = run;
@@ -317,7 +349,11 @@ public sealed partial class MainWindow
             ShowNotice(InfoBarSeverity.Error, "Checking the links failed", ex.Message);
             sorted = false;
         }
-        if (_review != run) return; // checked anew meanwhile
+        if (_review != run)
+        {
+            run.Batch.Release(); // checked anew or cancelled meanwhile: its names are free again
+            return;
+        }
         ReviewRing.IsActive = false;
         ReviewRing.Visibility = Visibility.Collapsed;
         if (!sorted)
@@ -330,6 +366,7 @@ public sealed partial class MainWindow
         foreach (var file in files)
         {
             var row = new ReviewRow(file);
+            if (file.Job.Urls.Any(unticked.Contains)) row.IsSelected = false;
             row.PropertyChanged += (_, _) => UpdateDownloadButton();
             ReviewRows.Add(row);
         }
@@ -341,7 +378,7 @@ public sealed partial class MainWindow
         ReviewText.Text = string.Join(" ", notes);
         CancelReviewButton.Content = "Discard";
         UpdateDownloadButton();
-        if (start) Download_Click(this, new RoutedEventArgs());
+        if (start && ReviewRows.Any(r => r.IsSelected)) Download_Click(this, new RoutedEventArgs());
     }
 
     void UpdateDownloadButton()
@@ -355,6 +392,7 @@ public sealed partial class MainWindow
 
     void CancelReview()
     {
+        ReviewRing.IsActive = false;
         _reviewCts?.Cancel();
         _reviewCts = null;
         _review?.Batch.Release();
@@ -366,14 +404,15 @@ public sealed partial class MainWindow
     /// <summary>The ticked files go into the download list and start; the boxes are emptied for the next download.</summary>
     void Download_Click(object sender, RoutedEventArgs e)
     {
-        if (_review is not { } run || ReviewRing.IsActive) return;
+        if (_review is not { } run || ReviewRing.IsActive || !ReviewRows.Any(r => r.IsSelected)) return;
         foreach (var row in ReviewRows.Where(r => !r.IsSelected)) run.Batch.Remove(row.File);
-        if (run.Batch.Files.All(f => f.State == FileState.Removed)) return;
         _review = null;
         _reviewCts = null;
         ReviewRows.Clear();
         ReviewCard.Visibility = Visibility.Collapsed;
-        ClearEntries();
+        // Only the boxes the check took: links that came in since (the clipboard, say) stay for the next check.
+        foreach (var entry in _checkedEntries) ListOf(entry.Kind).Remove(entry);
+        foreach (var kind in new[] { EntryKind.Link, EntryKind.Checksum, EntryKind.Unfinished }) KeepEmptyBox(kind);
         _settings.SaveTo = SaveToBox.Text.Trim();
         _settings.Save();
         Notice.IsOpen = false;
@@ -390,7 +429,7 @@ public sealed partial class MainWindow
         ShowNotice(InfoBarSeverity.Informational, $"{Format.Plural(added, "link")} from {from}",
             check ? $"{(added == 1 ? "It is" : "They are")} checked now; nothing is downloaded before you say so."
                   : "Press Check links to see what they lead to.");
-        if (check)
+        if (check && !_shutDown)
         {
             Activate();
             WindowsShell.Flash(_hwnd);

@@ -183,5 +183,8 @@ static class Program
         several of the same file, it checks each one and puts together what they hold. A file that
         is in the save folder already, complete, is only checked, not downloaded again. Ctrl+C
         pauses; run the same command again to continue.
+
+        Exit codes: 0 all done, 1 a file failed, 2 a file doesn't match its checksum or links,
+        130 paused.
         """;
 }

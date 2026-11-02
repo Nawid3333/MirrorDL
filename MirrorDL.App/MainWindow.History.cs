@@ -46,7 +46,7 @@ public sealed partial class MainWindow
     void HistoryOpen_Click(object sender, RoutedEventArgs e)
     {
         if (EntryOf(sender)?.Path is { } path && File.Exists(path))
-            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+            Open(path);
         else
             ShowHistoryNotice("The file isn't there anymore: it was moved or deleted.");
     }
@@ -66,8 +66,16 @@ public sealed partial class MainWindow
         if (EntryOf(sender) is not { } entry) return;
         var package = new DataPackage();
         package.SetText(string.Join("\r\n", entry.Links));
-        _ownCopy = true; // not taken back in by the clipboard watcher
-        Clipboard.SetContent(package);
+        try
+        {
+            _ownCopy = _settings.WatchClipboard; // not taken back in by the clipboard watcher
+            Clipboard.SetContent(package);
+        }
+        catch (Exception ex)
+        {
+            _ownCopy = false;
+            ShowHistoryNotice("Couldn't copy the links: " + ex.Message);
+        }
     }
 
     void HistoryRemove_Click(object sender, RoutedEventArgs e)

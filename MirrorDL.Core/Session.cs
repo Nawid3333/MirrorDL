@@ -207,19 +207,7 @@ public sealed class Session
     public Status GetStatus()
     {
         long? size = Size;
-        IReadOnlyList<(long Start, long End)> missing;
-        long have;
-        if (_single is { } single)
-        {
-            have = Interlocked.Read(ref single.Bytes);
-            missing = size is long total && have < total ? [(have, total)] : [];
-        }
-        else
-        {
-            missing = _engine?.Remaining() ?? _missing ?? (IReadOnlyList<(long, long)>)[];
-            have = size is long total ? total - Ranges.Sum(missing) : 0;
-            if (_engine == null && _missing == null) have = 0;
-        }
+        var (have, missing) = Have();
 
         long now = Environment.TickCount64;
         var links = _mirrors.Select(m =>
@@ -234,6 +222,20 @@ public sealed class Session
         double verify = verifyTotal > 0 ? Interlocked.Read(ref _verifyDone) * 100.0 / verifyTotal : 0;
         return new Status(_phase, size, have, _speed.Update(received), seconds > 0 ? received / seconds : 0,
             _watch.Elapsed, links, missing, verify);
+    }
+
+    /// <summary>How much of the file is there, and what is missing - without measuring the speed, so from any thread.</summary>
+    internal (long Have, IReadOnlyList<(long Start, long End)> Missing) Have()
+    {
+        long? size = Size;
+        if (_single is { } single)
+        {
+            long have = Interlocked.Read(ref single.Bytes);
+            return (have, size is long total && have < total ? [(have, total)] : []);
+        }
+        var missing = _engine?.Remaining() ?? _missing ?? (IReadOnlyList<(long, long)>)[];
+        if (_engine == null && _missing == null) return (0, missing);
+        return (size is long whole ? whole - Ranges.Sum(missing) : 0, missing);
     }
 
     async Task<int> RunCoreAsync(CancellationToken ct)

@@ -369,6 +369,62 @@ public class BatchTests
     }
 
     [Fact]
+    public async Task The_file_being_downloaded_cant_be_removed()
+    {
+        using var d = new Download();
+        d.Link(A, "a.bin").ChunkDelay = TimeSpan.FromMilliseconds(5);
+        bool? removed = null;
+        d.OnPhase = phase =>
+        {
+            if (phase == Phase.Downloading) removed ??= d.Batch.Remove(d.Batch.Files[0]);
+        };
+
+        Assert.Equal(0, await d.RunBatchAsync());
+        Assert.False(removed);
+        Assert.Equal(FileState.Done, d.Batch.Files[0].State);
+    }
+
+    [Fact]
+    public async Task Cancelled_while_the_links_are_checked_the_next_run_checks_them_anew()
+    {
+        using var d = new Download();
+        d.Link(A, "a.bin").Answer = (_, n) =>
+        {
+            if (n == 1) Thread.Sleep(300); // slow to answer the first time, so that the check can be cancelled
+            return null;
+        };
+        using var pause = new CancellationTokenSource(100);
+
+        Assert.Equal(130, await d.RunBatchAsync(pause));
+        Assert.False(d.Batch.IsSorted);
+        Assert.Contains("Cancelled.", d.Output);
+        Assert.Equal(0, await d.RunBatchAsync(again: true));
+        Assert.Equal(A, File.ReadAllBytes(d.PathOf("a.bin")));
+    }
+
+    [Fact]
+    public async Task With_pages_not_searched_a_page_is_said_to_be_one()
+    {
+        using var d = new Download();
+        d.Job.LookIntoPages = false;
+        var page = d.Link(System.Text.Encoding.UTF8.GetBytes("""<a href="http://cdn.test/x.rar">x.rar</a>"""), "f/abc");
+        page.ContentType = "text/html";
+
+        Assert.Equal(1, await d.RunBatchAsync());
+        Assert.True(d.Batch.Files[0].IsPage);
+        Assert.Contains("pages aren't searched for links", d.Batch.Files[0].Message);
+        Assert.Equal(1, page.Requests); // asked what it is, never read
+    }
+
+    [Fact]
+    public void The_summary_counts_each_way_a_file_ended()
+    {
+        var files = new[] { FileState.Done, FileState.Done, FileState.Mismatch, FileState.Paused }
+            .Select((state, i) => new BatchFile(i + 1, $"f{i}", 10, new Job(), []) { State = state }).ToList();
+        Assert.Equal("4 files: 2 saved, 1 doesn't match, 1 paused", Batch.Summary(files));
+    }
+
+    [Fact]
     public async Task With_one_file_set_all_links_are_mirrors_of_it_as_before()
     {
         using var d = new Download();
@@ -396,7 +452,7 @@ public class BatchTests
         try
         {
             // The first is sorted (its names claimed) but not done, as while it waits or is paused.
-            using (var stop = new CancellationTokenSource())
+            using (var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken))
             {
                 batch.Sorted += () => stop.Cancel();
                 Assert.Equal(130, await batch.RunAsync(stop.Token));
