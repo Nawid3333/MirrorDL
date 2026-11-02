@@ -97,7 +97,12 @@ sealed class BrowserWindow : Window
         if (text.Length == 0) return null;
         if (Uri.TryCreate(text, UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
             return uri;
-        if (!text.Contains(' ') && text.Contains('.') && Uri.TryCreate("https://" + text, UriKind.Absolute, out uri)) return uri;
+        // A site's name: its last part is a top-level domain ("1fichier.com"), or it is an IP address or localhost -
+        // "1.5" or "v2.1" are searched, as browsers do.
+        if (!text.Contains(' ') && Uri.TryCreate("https://" + text, UriKind.Absolute, out uri)
+            && (uri.Host == "localhost" || System.Net.IPAddress.TryParse(uri.Host, out _)
+                || uri.Host.Contains('.') && uri.Host[(uri.Host.LastIndexOf('.') + 1)..] is { Length: >= 2 } tld && tld.All(char.IsLetter)))
+            return uri;
         return new Uri("https://www.bing.com/search?q=" + Uri.EscapeDataString(text));
     }
 
