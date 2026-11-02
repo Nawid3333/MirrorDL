@@ -77,7 +77,8 @@ public sealed partial class MainWindow : Window
         if (_shutDown) return;
         foreach (string arg in args.Where(a => a != "--start"))
         {
-            // A .txt file that can't be read (in use, only in the cloud) must not keep the window from opening.
+            // A path that can't be used (too long, in a folder without access) must not keep the window from opening;
+            // a list of links that can't be read is said by Distribute.
             try { Distribute(arg); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {

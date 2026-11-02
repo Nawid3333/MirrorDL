@@ -95,9 +95,17 @@
                             <StackPanel Spacing="6">
                                 <TextBlock Text="New download" Style="{StaticResource SubtitleTextBlockStyle}" />
                                 <TextBlock Style="{StaticResource Help}"
-                                           Text="Paste links, checksums or unfinished files into any box, or drop them on the window: each one goes into a box of its own, in the right list. Several links to the same file are used together as its mirrors; links to other files become downloads of their own." />
+                                           Text="Paste links, checksums or unfinished files into any box, or drop them on the window: each one goes into a box of its own, in the right list. A .txt or .md file gives the links and checksums written in it. Several links to the same file are used together as its mirrors; links to other files become downloads of their own." />
 
-                                <TextBlock Text="Links" Style="{StaticResource Section}" />
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Links" Style="{StaticResource Section}" VerticalAlignment="Bottom" />
+                                    <Button x:Name="LinkFileButton" Grid.Column="1" Content="From a file…" Click="LinkFile_Click"
+                                            ToolTipService.ToolTip="Add the links and checksums written in a list: a .txt or .md file, or any other text file" />
+                                </Grid>
                                 <ScrollViewer MaxHeight="260" VerticalScrollBarVisibility="Auto">
                                     <ItemsControl ItemsSource="{x:Bind LinkEntries}">
                                         <ItemsControl.ItemTemplate>

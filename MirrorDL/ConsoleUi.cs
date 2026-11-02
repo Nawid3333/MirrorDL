@@ -47,13 +47,16 @@ static class Ui
         Console.WriteLine("Paste the download links (one per line), then press Enter on an empty line.");
         Dim("Links to the same file are used together; links to other files are downloaded one after another.");
         Dim("You can also paste checksums (MD5/SHA-1/SHA-256/SHA-384/SHA-512, also as \"<checksum>  <file name>\"), drag");
-        Dim("in unfinished downloads (from mirrordl, Firefox, aria2, any name) to continue them, or a folder to save in.");
+        Dim("in unfinished downloads (from mirrordl, Firefox, aria2, any name) to continue them, a .txt or .md file with");
+        Dim("links, or a folder to save in.");
         Console.WriteLine();
         while (Console.ReadLine() is { } line)
         {
             if (line.Trim().Length > 0)
             {
-                Input.Add(line, job, ignored);
+                // A list of links that can't be read is said; the rest pasted still counts.
+                try { Input.Add(line, job, ignored); }
+                catch (UserError e) { Error(e.Message); }
                 continue;
             }
             if (job.Urls.Count == 0)
