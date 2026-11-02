@@ -27,6 +27,8 @@ public class LinkFilesTests
     [InlineData("_https://a.example/file.iso_", "https://a.example/file.iso")]
     [InlineData("~~https://a.example/file.iso~~", "https://a.example/file.iso")]
     [InlineData("**https://a.example/file.iso**.", "https://a.example/file.iso")]
+    [InlineData("**_https://a.example/file.iso_**", "https://a.example/file.iso")]
+    [InlineData("~~*https://a.example/file.iso*~~", "https://a.example/file.iso")]
     // Marks that nothing opened before the link are part of it.
     [InlineData("https://a.example/Game[EU](v2).iso", "https://a.example/Game[EU](v2).iso")]
     [InlineData("https://a.example/releases/*", "https://a.example/releases/*")]

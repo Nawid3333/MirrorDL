@@ -88,7 +88,7 @@ public static class Input
             while (s.Length > 0)
             {
                 char last = s[^1];
-                if (marks.Length > 0 && last == marks[^1]) marks = marks[..^1];
+                if (marks.Length > 0 && last == marks[0]) marks = marks[1..]; // "**_link_**": the outermost closes last
                 else if (!(".,:;!?'".Contains(last)
                            || last == ')' && s.Count(c => c == '(') < s.Count(c => c == ')')
                            || last == ']' && s.Count(c => c == '[') < s.Count(c => c == ']')))
