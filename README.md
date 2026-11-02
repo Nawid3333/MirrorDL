@@ -103,6 +103,9 @@ to; tick the ones you want and press **Download**.
   see its details below the list: speed, time left, connections, its links, a map of the file,
   and its messages. **Pause** saves the progress; so does closing the window during a download.
 - A file that is in the save folder already, complete, is only checked, not downloaded again.
+- **When all downloads are done:** next to the download-list buttons, the PC can be told to sleep,
+  hibernate or shut down once nothing in the list runs anymore. A 60-second countdown comes first
+  that you can cancel; the choice isn't kept between starts.
 - **History** lists the finished downloads; **Settings** (the gear) has a switch for every extra.
 
 `MirrorDL.exe --start <links…>` fills in the links and starts at once, without showing the files

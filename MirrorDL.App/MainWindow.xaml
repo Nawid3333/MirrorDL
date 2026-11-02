@@ -321,6 +321,15 @@
                                                 <TextBlock Text="Clear finished" />
                                             </StackPanel>
                                         </Button>
+                                        <TextBlock Text="When done:" Style="{StaticResource Label}" VerticalAlignment="Center" Margin="8,0,0,0" />
+                                        <ComboBox x:Name="WhenDoneBox" SelectedIndex="0" MinWidth="120" VerticalAlignment="Center" AutomationProperties.Name="When done"
+                                                  Loaded="WhenDoneBox_Loaded"
+                                                  ToolTipService.ToolTip="What the PC does once all downloads in the list are finished. Asked again at every start, so a choice made today can't turn the PC off another day. A 60-second countdown comes first; you can cancel it.">
+                                            <ComboBoxItem Content="Do nothing" />
+                                            <ComboBoxItem x:Name="WhenDoneSleep" Content="Sleep" />
+                                            <ComboBoxItem x:Name="WhenDoneHibernate" Content="Hibernate" />
+                                            <ComboBoxItem x:Name="WhenDoneShutDown" Content="Shut down" />
+                                        </ComboBox>
                                     </StackPanel>
                                 </Grid>
                                 <TextBlock x:Name="NoDownloadsText" Style="{StaticResource Label}" Margin="0,4"
