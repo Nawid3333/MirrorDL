@@ -156,8 +156,8 @@ static class Program
 
         Usage:
           mirrordl                       asks you to paste the links
-          mirrordl [options] <input>...  inputs: links, unfinished files to continue (any name), a .txt
-                                         file with links, a checksum (MD5/SHA-1/SHA-256/SHA-384/SHA-512),
+          mirrordl [options] <input>...  inputs: links, a .txt or .md file with links, unfinished files to
+                                         continue (any name), a checksum (MD5/SHA-1/SHA-256/SHA-384/SHA-512),
                                          also with its file name ("<checksum>  <name>"), a folder
 
         Options:

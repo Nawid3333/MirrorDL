@@ -93,7 +93,9 @@ public sealed partial class MainWindow
         try
         {
             string text = (await content.GetTextAsync()).Trim();
-            if (!text.Contains('\n') && !text.Contains('\r') && KindOf(text) is var kind && (kind == null || kind == row.Kind)
+            // A link among marks ("<link>", "[name](link)") is taken out of them, like one in a pasted list.
+            if (!text.Contains('\n') && !text.Contains('\r') && KindOf(text) is var kind
+                && (kind == null && Input.LinksIn(text).Count == 0 || kind == row.Kind)
                 && (row.Kind != EntryKind.Link || !text.Contains(' ')))
             {
                 box.SelectedText = text;
@@ -126,14 +128,17 @@ public sealed partial class MainWindow
 
     /// <summary>
     /// Sorts pasted or dropped text into the boxes: links, checksums (a checksum on the line of a link stays with it),
-    /// unfinished files, a folder to save in; a .txt file's lines as if pasted. Says what went where.
+    /// unfinished files, a folder to save in. A .txt or .md file named in it gives the links and checksums written in
+    /// it - with <paramref name="lists"/>, any file does. Says what went where.
     /// </summary>
-    void Distribute(string text)
+    void Distribute(string text, bool lists = false)
     {
         int links = 0, checksums = 0, files = 0;
         var ignored = new List<string>();
-        var lists = new HashSet<string>(StringComparer.OrdinalIgnoreCase); // .txt files read already
-        void Use(string raw)
+        var read = new List<string>();                                  // the lists of links read
+        var unreadable = new List<string>();                            // and why others couldn't be
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void Use(string raw, bool inList)
         {
             foreach (string full in raw.Split('\r', '\n'))
             {
@@ -144,17 +149,15 @@ public sealed partial class MainWindow
                     if (AddEntry(EntryKind.Checksum, line)) checksums++;
                     continue;
                 }
-                if (IsFolder(line))
+                // A list gives links and checksums only: a folder or file named in it is a note, not something to use.
+                if (!inList && IsFolder(line))
                 {
                     SaveToBox.Text = line;
                     continue;
                 }
-                if (IsFile(line))
+                if (!inList && IsFile(line))
                 {
-                    if (line.EndsWith(".txt", StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (lists.Add(Path.GetFullPath(line)) && lists.Count <= 100) Use(File.ReadAllText(line));
-                    }
+                    if (lists || LinkFiles.Is(line)) ReadList(Path.GetFullPath(line));
                     else if (AddEntry(EntryKind.Unfinished, Path.GetFullPath(line))) files++;
                     continue;
                 }
@@ -162,28 +165,47 @@ public sealed partial class MainWindow
                 var sums = new List<string>();
                 foreach (string token in line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
                 {
+                    var found = Input.LinksIn(token);
+                    foreach (var uri in found)
+                        if (AddEntry(EntryKind.Link, uri.OriginalString)) links++;
+                    link ??= found.FirstOrDefault();
+                    if (found.Count > 0) continue;
                     string t = token.Trim('"', '\'', '<', '>', '(', ')', ',', ';');
-                    if (KindOf(t) == EntryKind.Link)
-                    {
-                        if (AddEntry(EntryKind.Link, t)) links++;
-                        link ??= new Uri(t);
-                    }
-                    else if (Checksum.TryParse(t, out string? hex)) sums.Add(hex);
-                    else ignored.Add(t);
+                    if (Checksum.TryParse(t, out string? hex)) sums.Add(hex);
+                    else if (!inList) ignored.Add(t); // the words around the links of a list are its notes
                 }
                 foreach (string hex in sums)
                     if (AddEntry(EntryKind.Checksum, link != null ? $"{hex}  {link}" : hex)) checksums++;
             }
         }
-        Use(text);
+        void ReadList(string path)
+        {
+            if (!seen.Add(path)) return;
+            try
+            {
+                Use(LinkFiles.Read(path), inList: true);
+                read.Add(Path.GetFileName(path));
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException)
+            {
+                unreadable.Add($"{Path.GetFileName(path)}: {e.Message}");
+            }
+        }
+        Use(text, inList: false);
+
         var added = new List<string>();
         if (links > 0) added.Add(Format.Plural(links, "link"));
         if (checksums > 0) added.Add(Format.Plural(checksums, "checksum"));
         if (files > 0) added.Add(Format.Plural(files, "unfinished file"));
-        if (added.Count > 0 || ignored.Count > 0)
-            ShowNotice(InfoBarSeverity.Informational, added.Count > 0 ? "Added " + string.Join(", ", added) : "Nothing to add",
-                ignored.Count > 0 ? "Not a link, checksum or file, so left out: " + string.Join(", ", ignored.Take(5).Select(s => Format.Clip(s, 30))) +
-                                    (ignored.Count > 5 ? $" and {ignored.Count - 5} more" : "") : null);
+        var notes = new List<string>();
+        if (read.Count > 0) notes.Add((added.Count > 0 ? "Read from " : "No new links or checksums in ") + string.Join(", ", read) + ".");
+        if (unreadable.Count > 0) notes.Add("Couldn't read " + string.Join(" ", unreadable));
+        if (ignored.Count > 0)
+            notes.Add("Not a link, checksum or file, so left out: " + string.Join(", ", ignored.Take(5).Select(s => Format.Clip(s, 30))) +
+                      (ignored.Count > 5 ? $" and {ignored.Count - 5} more" : ""));
+        if (added.Count > 0 || notes.Count > 0)
+            ShowNotice(unreadable.Count > 0 ? InfoBarSeverity.Warning : InfoBarSeverity.Informational,
+                added.Count > 0 ? "Added " + string.Join(", ", added) : "Nothing to add", notes.Count > 0 ? string.Join(" ", notes) : null);
     }
 
     static bool IsFolder(string text)
@@ -210,6 +232,23 @@ public sealed partial class MainWindow
         catch (Exception ex)
         {
             ShowNotice(InfoBarSeverity.Warning, "Couldn't open the folder picker", ex.Message + " Type or paste the folder instead.");
+        }
+    }
+
+    /// <summary>Lists of links kept in files: any file picked here is read for its links and checksums, whatever its ending.</summary>
+    async void LinkFile_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.Downloads };
+            foreach (string type in LinkFiles.Endings.Append("*")) picker.FileTypeFilter.Add(type);
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, _hwnd);
+            var picked = await picker.PickMultipleFilesAsync();
+            if (picked.Count > 0) Distribute(string.Join("\n", picked.Select(f => f.Path)), lists: true);
+        }
+        catch (Exception ex)
+        {
+            ShowNotice(InfoBarSeverity.Warning, "Couldn't open the file picker", ex.Message + " Drop the file on the window instead.");
         }
     }
 

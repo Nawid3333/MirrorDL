@@ -47,7 +47,7 @@ Upload `MirrorDL-x64.msix`. Device family: **Windows 10/11 Desktop**.
 ```
 MirrorDL downloads files from several links (mirrors) at the same time, so big downloads finish faster - and it first checks that every link really serves the same file.
 
-- Many files at once: paste the links to several files, also several mirrors of each. MirrorDL sorts them into files by name, size and content, shows you what it found, and downloads what you tick.
+- Many files at once: paste the links to several files, also several mirrors of each, or add a .txt or .md file that lists them. MirrorDL sorts them into files by name, size and content, shows you what it found, and downloads what you tick.
 - A download list: start new downloads while others run, pause and resume each one. Paused downloads are still there after closing MirrorDL or restarting the PC.
 - Links from web pages: a file host's page is searched for its download link; a page with a captcha opens in MirrorDL's browser, and MirrorDL takes the link once you click its download button. Click'n'Load takes links from link sites.
 - All mirrors at once: every link gets several connections, and fast mirrors keep taking work over from slow ones until the end.
@@ -72,7 +72,7 @@ on its GitHub page and a link to it ([microsoft-store.md](microsoft-store.md#wha
 
 ```
 Downloads files from several mirrors at once
-Sorts pasted links into files and shows them before downloading
+Sorts pasted links, or a .txt or .md list of them, into files and shows them before downloading
 Starts new downloads while others run; keeps paused ones after a restart
 Takes download links from web pages and Click'n'Load
 Continues unfinished downloads of Firefox and aria2
