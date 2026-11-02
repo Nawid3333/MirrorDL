@@ -476,19 +476,20 @@ public sealed partial class MainWindow
     }
 
     /// <summary>Links from elsewhere - Click'n'Load, the clipboard, the browser: into the boxes, and checked so that the user sees them.</summary>
-    void TakeLinks(IReadOnlyCollection<string> links, string from, bool check)
+    void TakeLinks(IReadOnlyCollection<string> links, string from, bool check, bool start = false)
     {
         int added = links.Count(l => AddEntry(EntryKind.Link, l));
         if (added == 0) return;
         ShowDownloads();
         ShowNotice(InfoBarSeverity.Informational, $"{Format.Plural(added, "link")} from {from}",
-            check ? $"{(added == 1 ? "It is" : "They are")} checked now; nothing is downloaded before you say so."
-                  : "Press Check links to see what they lead to.");
+            !check ? "Press Check links to see what they lead to."
+            : start ? $"{(added == 1 ? "It is" : "They are")} checked now and start{(added == 1 ? "s" : "")} right away."
+            : $"{(added == 1 ? "It is" : "They are")} checked now; nothing is downloaded before you say so.");
         if (check && !_shutDown)
         {
             Activate();
             WindowsShell.Flash(_hwnd);
-            _ = CheckAsync(start: false);
+            _ = CheckAsync(start: start);
         }
     }
 }

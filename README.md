@@ -97,6 +97,9 @@ to; tick the ones you want and press **Download**.
   file…** next to Links (that one reads any text file up to 4 MB). MirrorDL takes the links and
   checksums written in it - also markdown's `[name](link)`, lists and tables - and leaves the words,
   pictures and paths around them.
+- **The Browser button** (next to **From a file…**) opens MirrorDL's browser to browse anywhere: a
+  download clicked there is handed to MirrorDL and checked; it starts at once when **Show the files
+  before downloading** is switched off in Settings.
 - The files of one check download one after another, each with all of the internet line, so the
   first ones are done soonest. Check more links while they run: those start next to them.
 - Each download has its buttons: pause, resume, show in folder, take off the list. Click one to
