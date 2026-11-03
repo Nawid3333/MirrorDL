@@ -21,7 +21,6 @@ sealed class Settings
     public int? Connections { get; set; }
     public int? PerLink { get; set; }
     // Links from elsewhere
-    public bool ClickNLoad { get; set; } = true;
     public bool Browser { get; set; } = true;
     public bool WatchClipboard { get; set; }
     // Window

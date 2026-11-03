@@ -475,7 +475,7 @@ public sealed partial class MainWindow
         StartRun(run);
     }
 
-    /// <summary>Links from elsewhere - Click'n'Load, the clipboard, the browser: into the boxes, and checked so that the user sees them.</summary>
+    /// <summary>Links from elsewhere - the clipboard, the browser: into the boxes, and checked so that the user sees them.</summary>
     void TakeLinks(IReadOnlyCollection<string> links, string from, bool check, bool start = false)
     {
         int added = links.Count(l => AddEntry(EntryKind.Link, l));

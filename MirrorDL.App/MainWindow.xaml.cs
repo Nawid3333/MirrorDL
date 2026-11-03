@@ -55,7 +55,6 @@ public sealed partial class MainWindow : Window
         BuildSettings();
         LoadHistory();
         RestoreList();
-        ApplyClickNLoad();
         ApplyClipboard();
         if (!Native.IsPackaged() && _settings.CheckForUpdates) _ = CheckForUpdateAsync();
 
@@ -160,8 +159,6 @@ public sealed partial class MainWindow : Window
         _closing = true;
         SaveList();
         _timer.Stop();
-        _cnl?.Dispose();
-        _cnl = null;
         Windows.ApplicationModel.DataTransfer.Clipboard.ContentChanged -= Clipboard_ContentChanged;
         WindowsShell.KeepAwake(false);
         foreach (var browser in _browsers.ToList()) browser.Close();
