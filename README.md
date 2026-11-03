@@ -27,10 +27,9 @@ Firefox or aria2 left behind. It runs on Windows 10 and 11, as a window app and 
   or all at once. The list is kept: after closing MirrorDL or restarting the PC, press Resume.
 - **Links from web pages.** A link to a file host's page is searched for the link behind its
   download button. A page that needs a captcha opens in MirrorDL's own browser: solve it, click
-  the download button, and MirrorDL takes the link. **Click'n'Load** takes the links from sites
-  like filecrypt, as JDownloader does.
+  the download button, and MirrorDL takes the link.
 - **History and settings.** Finished downloads are listed, searchable, with their links. Every
-  extra - the history, keeping the list, Click'n'Load, watching the clipboard, keeping the PC
+  extra - the history, keeping the list, watching the clipboard, keeping the PC
   awake, the taskbar progress - is a switch in Settings, with what it does. The theme follows
   Windows, or is light, dark or **OLED black** (a pure black window).
 - **One window.** Starting MirrorDL again, or dropping files on MirrorDL.exe, hands them to the
@@ -121,11 +120,6 @@ and takes the links to files on it. A page whose link only appears after a captc
 shows none: **Open page** opens it in MirrorDL's browser. Solve the captcha, click the download
 button, and MirrorDL takes the link and shows the file - the page's own download doesn't happen.
 MirrorDL never solves a captcha for you.
-
-Link sites such as filecrypt have a **Click'n'Load** button. Solve their captcha in your browser
-and press it: the links go to MirrorDL (on 127.0.0.1, port 9666, which only your PC can reach), and
-MirrorDL shows the files - nothing is downloaded before you say so. Only one program can take the
-links at a time: close JDownloader to use it in MirrorDL.
 
 ### Terminal
 

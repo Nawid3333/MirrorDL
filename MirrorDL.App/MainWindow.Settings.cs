@@ -12,8 +12,6 @@ namespace MirrorDL.App;
 /// <summary>Settings: every feature that isn't the download itself can be switched off, each with what it does.</summary>
 public sealed partial class MainWindow
 {
-    ClickNLoad? _cnl;
-    TextBlock? _cnlState;
     bool _ownCopy;
     static readonly Regex LinkPattern = new(@"https?://[^\s""'<>]+", RegexOptions.IgnoreCase);
 
@@ -32,8 +30,8 @@ public sealed partial class MainWindow
             () => _settings.LookIntoPages, v => _settings.LookIntoPages = v);
         Toggle("Show the files before downloading",
             "After Check links, MirrorDL lists the files the links lead to - name, size, links, notes - and you tick which ones to " +
-            "download. Off: what can be downloaded starts right away. Links that come from Click'n'Load, the browser or the " +
-            "clipboard are always shown first.",
+            "download. Off: what can be downloaded starts right away. Links that come from the browser or the clipboard are " +
+            "always shown first.",
             () => _settings.Review, v =>
             {
                 _settings.Review = v;
@@ -57,12 +55,6 @@ public sealed partial class MainWindow
             () => _settings.PerLink, v => _settings.PerLink = v);
 
         Section("Links from other programs");
-        _cnlState = Toggle("Click'n'Load",
-            "Link sites such as filecrypt have a Click'n'Load button: once you solved their captcha in your browser, it sends the " +
-            "links to a download program on this PC. MirrorDL takes them as JDownloader does (127.0.0.1, port 9666, which only this " +
-            "PC can reach) and shows them for checking - nothing is downloaded by itself. Only one program can take them: close " +
-            "JDownloader to use it here.",
-            () => _settings.ClickNLoad, v => _settings.ClickNLoad = v, ApplyClickNLoad, withState: true);
         Toggle("Open download pages in MirrorDL's browser",
             "A web page whose download button needs a captcha or a click opens in a window of MirrorDL: solve the captcha, click the " +
             "button, and MirrorDL takes the link - the page's own download doesn't happen. Its cookies are kept in MirrorDL's folder " +
@@ -123,7 +115,7 @@ public sealed partial class MainWindow
         });
 
     /// <summary>A card: the setting's name and what it does on the left, <paramref name="control"/> on the right.</summary>
-    StackPanel Card(string title, string help, FrameworkElement control)
+    void Card(string title, string help, FrameworkElement control)
     {
         var grid = new Grid { Style = (Style)Root.Resources["SettingCard"] };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -138,7 +130,6 @@ public sealed partial class MainWindow
         grid.Children.Add(control);
         AutomationHelp(control, title, help);
         SettingsPanel.Children.Add(grid);
-        return text;
     }
 
     static void AutomationHelp(FrameworkElement control, string title, string help)
@@ -147,7 +138,7 @@ public sealed partial class MainWindow
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(control, help);
     }
 
-    TextBlock? Toggle(string title, string help, Func<bool> get, Action<bool> set, Action? after = null, bool withState = false)
+    void Toggle(string title, string help, Func<bool> get, Action<bool> set, Action? after = null)
     {
         var toggle = new ToggleSwitch { IsOn = get(), OnContent = "On", OffContent = "Off", MinWidth = 0 };
         toggle.Toggled += (_, _) =>
@@ -157,11 +148,7 @@ public sealed partial class MainWindow
             after?.Invoke();
             UpdateList();
         };
-        var text = Card(title, help, toggle);
-        if (!withState) return null;
-        var state = new TextBlock { Style = (Style)Root.Resources["Help"] };
-        text.Children.Add(state);
-        return state;
+        Card(title, help, toggle);
     }
 
     void Choice(string title, string help, (string Key, string Name)[] options, Func<string> get, Action<string> set, Action after)
@@ -203,27 +190,6 @@ public sealed partial class MainWindow
         var control = new Button { Content = button };
         control.Click += (_, _) => action();
         Card(title, help, control);
-    }
-
-    /// <summary>Starts or stops listening for Click'n'Load as the setting says, and tells whether it listens.</summary>
-    void ApplyClickNLoad()
-    {
-        if (_settings.ClickNLoad && _cnl == null)
-        {
-            _cnl = ClickNLoad.Start();
-            if (_cnl != null)
-                _cnl.Received += (links, source) => DispatcherQueue.TryEnqueue(() =>
-                    TakeLinks(links, "Click'n'Load" + (Uri.TryCreate(source, UriKind.Absolute, out var page) ? $" ({page.Host})" : ""), check: true));
-        }
-        else if (!_settings.ClickNLoad && _cnl != null)
-        {
-            _cnl.Dispose();
-            _cnl = null;
-        }
-        if (_cnlState != null)
-            _cnlState.Text = !_settings.ClickNLoad ? ""
-                : _cnl != null ? $"Listening on port {_cnl.Port}."
-                : $"Port {ClickNLoad.DefaultPort} is used by another program (JDownloader?), so MirrorDL can't take links from Click'n'Load now. Close it and switch this off and on.";
     }
 
     /// <summary>The Browser button in the new download is there as long as MirrorDL's browser is on.</summary>

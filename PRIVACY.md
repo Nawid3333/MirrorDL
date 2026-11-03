@@ -14,10 +14,6 @@ It connects only to:
   version gets its updates from the Store. Like any website, GitHub receives the usual request
   data, such as your IP address.
 
-**Click'n'Load:** the window app listens on 127.0.0.1, port 9666, for links that link sites send
-from your browser. Only programs on your own computer can reach it. Links that arrive are shown to
-you, never downloaded by themselves. It can be switched off in Settings.
-
 **Clipboard:** only if you switch on "Watch the clipboard for links", MirrorDL looks at what you
 copy and takes the links from it. Nothing of it leaves your computer.
 

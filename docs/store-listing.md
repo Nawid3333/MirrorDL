@@ -49,7 +49,7 @@ MirrorDL downloads files from several links (mirrors) at the same time, so big d
 
 - Many files at once: paste the links to several files, also several mirrors of each, or add a .txt or .md file that lists them. MirrorDL sorts them into files by name, size and content, shows you what it found, and downloads what you tick.
 - A download list: start new downloads while others run, pause and resume each one. Paused downloads are still there after closing MirrorDL or restarting the PC.
-- Links from web pages: a file host's page is searched for its download link; a page with a captcha opens in MirrorDL's browser, and MirrorDL takes the link once you click its download button. Click'n'Load takes links from link sites.
+- Links from web pages: a file host's page is searched for its download link; a page with a captcha opens in MirrorDL's browser, and MirrorDL takes the link once you click its download button.
 - All mirrors at once: every link gets several connections, and fast mirrors keep taking work over from slow ones until the end.
 - Checks before it combines: links with another size or other content are skipped, so you never get a file stitched together from two versions.
 - Continues unfinished downloads, also those of other programs: Firefox .part files and aria2 downloads.
@@ -74,7 +74,7 @@ on its GitHub page and a link to it ([microsoft-store.md](microsoft-store.md#wha
 Downloads files from several mirrors at once
 Sorts pasted links, or a .txt or .md list of them, into files and shows them before downloading
 Starts new downloads while others run; keeps paused ones after a restart
-Takes download links from web pages and Click'n'Load
+Takes download links from web pages
 Continues unfinished downloads of Firefox and aria2
 Checks the results against MD5, SHA-1, SHA-256 or SHA-512 checksums
 History of finished downloads; every extra can be switched off
@@ -148,7 +148,7 @@ https://mirrors.edge.kernel.org/pub/linux/kernel/v6.x/linux-6.12.tar.xz
 
 Resume: press the pause button of the download, then the resume button; it goes on where it stopped. History lists finished downloads; Settings (the gear) has a switch for each extra.
 
-runFullTrust: MirrorDL is a WinUI 3 desktop app. It writes downloads to folders the user picks and continues unfinished .part files of Firefox and aria2 in place, so it needs normal file system access. For Click'n'Load it listens on 127.0.0.1 port 9666 (this PC only), and it opens download pages in a WebView2 window.
+runFullTrust: MirrorDL is a WinUI 3 desktop app. It writes downloads to folders the user picks and continues unfinished .part files of Firefox and aria2 in place, so it needs normal file system access. It opens download pages in a WebView2 window.
 
 Source code (GPL-3.0): https://github.com/Nawid3333/MirrorDL
 ```
