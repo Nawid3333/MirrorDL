@@ -132,6 +132,10 @@ If a release fails before it even has a version, the issue is **Automatic releas
 - A submission the workflow created must be changed only by the workflow. Edited in Partner Center,
   it can get stuck; then delete it there, and re-run the release's **Microsoft Store**
   job.
+- Don't leave a draft submission started in Partner Center lying around: the Store's API may not
+  replace it, so the workflow can't submit at all ("Ingestion API can only update, delete, and commit
+  submissions that are created through the API"). The job stops at once and says so; delete the
+  draft in Partner Center and re-run the release's **Microsoft Store** job.
 - The Store version number is the release's, with `.0` added: `v1.2.3` becomes `1.2.3.0`. It has to
   grow with every submission, which the releases do by themselves.
 - The key expires (Partner Center shows when). Before it does, add a new key and replace the
