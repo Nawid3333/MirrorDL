@@ -156,6 +156,7 @@ if ($Action -ne 'status') {
 Connect-Store
 
 if ($Action -eq 'submit') {
+    $blocked = $false
     for ($attempt = 1; ; $attempt++) {
         try {
             # Already there, or under way - from an earlier try, or a re-run of this job? A new publish would
@@ -168,8 +169,17 @@ if ($Action -eq 'submit') {
             if ($attempt -le 3) {
                 # Uploads the package into a new draft (replacing a draft an earlier try left), puts this
                 # release's notes in, and commits it.
-                & msstore publish (Resolve-Path $Package).Path -id $ProductId --noCommit
-                if ($LASTEXITCODE -eq 0) {
+                $publish = Invoke-Msstore publish (Resolve-Path $Package).Path -id $ProductId --noCommit
+                Write-Host $publish.Text
+                # A draft started or edited in Partner Center: the API may not delete it, so trying again
+                # can't help - only deleting it there does.
+                if ($publish.Text -match 'only update, delete, and commit submissions that are created\s+through the API') {
+                    $blocked = $true
+                    throw ("Partner Center holds a draft submission that was made or changed there, not by this workflow, " +
+                          "and the Store's API may not replace it. Delete that draft in Partner Center (the app > the " +
+                          "submission in progress > Delete), then re-run this job (docs/microsoft-store.md).")
+                }
+                if ($publish.Code -eq 0) {
                     # Without its notes the version goes out all the same, with the last version's; the run says so.
                     $withNotes = try { Set-ReleaseNotes $notes } catch { Write-Host $_.Exception.Message; $false }
                     if (-not $withNotes) { Write-Host "::warning::Putting the release's notes into the Store's submission failed; it keeps the last version's. Send them later with the Store notes workflow (docs/microsoft-store.md)." }
@@ -177,7 +187,10 @@ if ($Action -eq 'submit') {
                 }
             }
         }
-        catch { Write-Host $_.Exception.Message }
+        catch {
+            if ($blocked) { throw }
+            Write-Host $_.Exception.Message
+        }
         if ($attempt -gt 3) { throw "Submitting $storeVersion failed 3 times; the Store's submission is at $($submission.Status)." }
         # It went wrong on the way - perhaps only after Microsoft had taken it on, which the Store may not show
         # at once: wait before looking again.
