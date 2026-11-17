@@ -128,6 +128,8 @@ jobs:
       # caller must grant whatever any job of the called workflow asks for, skipped or not: without this,
       # every run of this workflow failed to start (startup_failure).
       issues: write
+      # The same for release.yml's store job, which grants it to store.yml (the package from another run).
+      actions: read
     with:
       tag: ${{ needs.version.outputs.tag }}
       sha: ${{ github.event.workflow_run.head_sha }}
