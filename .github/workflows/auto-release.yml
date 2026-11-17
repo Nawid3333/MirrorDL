@@ -178,6 +178,7 @@ jobs:
     uses: ./.github/workflows/store.yml
     permissions:
       contents: read
+      actions: read # store.yml's submit job asks for it (the package from another run, for store-status.yml)
     with:
       tag: ${{ needs.version.outputs.tag }}
     secrets:
@@ -212,6 +213,7 @@ jobs:
           BUILD: ${{ needs.build.result }}
           PUBLISH: ${{ needs.publish.result }}
           STORE: ${{ needs.store.result }}
+          STORE_RESULT: ${{ needs.store.outputs.result }}
           WITH_STORE: ${{ needs.build.outputs.store-package == 'true' && vars.STORE_PRODUCT_ID != '' }}
         run: |
           set -euo pipefail
@@ -234,7 +236,8 @@ jobs:
             "$rollout" ok "$TAG" github
           fi
           case $STORE in
-            success) "$rollout" ok "$TAG" store-submitted ;;
+            # queued: the Store is still certifying an earlier version; store-status.yml submits this one later.
+            success) if [ "$STORE_RESULT" = queued ]; then "$rollout" queue "$TAG"; else "$rollout" ok "$TAG" store-submitted; fi ;;
             skipped) ;;
             *) "$rollout" fail "$TAG" store-submitted "Submitting to the Microsoft Store did not work ($STORE); the GitHub release is out regardless. Fix the cause, then re-run the failed jobs." ;;
           esac

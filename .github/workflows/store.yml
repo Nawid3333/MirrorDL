@@ -11,6 +11,10 @@
 # (.github/scripts/rollout.sh). Fix the cause (an expired key, a submission edited in Partner Center),
 # then re-run this job. The Store certifies a submission before it goes live, which takes from hours to
 # a few days; store-status.yml keeps an eye on that and marks the release live on its page.
+#
+# While an earlier version is still in certification the Store takes no new submission. Then this job
+# doesn't fail: its result is 'queued', and store-status.yml calls it again once the Store is free,
+# with the run-id of the run that built the package.
 name: Microsoft Store
 
 on:
@@ -20,6 +24,10 @@ on:
         description: The release, like v1.2.3.
         type: string
         required: true
+      run-id:
+        description: The run that kept the release's store-package artifact; empty for this run.
+        type: string
+        default: ''
     secrets:
       AZURE_AD_TENANT_ID:
         required: false
@@ -29,6 +37,10 @@ on:
         required: false
       SELLER_ID:
         required: false
+    outputs:
+      result:
+        description: "'submitted', or 'queued' while the Store is still busy with an earlier version"
+        value: ${{ jobs.submit.outputs.result }}
 
 permissions:
   contents: read
@@ -38,6 +50,13 @@ jobs:
     name: Submit to the Microsoft Store
     runs-on: windows-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      # The package from another run (run-id). Every caller grants it: a called workflow asking for more
+      # than its caller gives does not start at all (startup_failure).
+      actions: read
+    outputs:
+      result: ${{ steps.submit.outputs.result }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -48,6 +67,8 @@ jobs:
         with:
           name: store-package
           path: package
+          run-id: ${{ inputs.run-id || github.run_id }}
+          github-token: ${{ github.token }}
 
       # Microsoft's action: installs the Microsoft Store Developer CLI (msstore).
       - uses: microsoft/microsoft-store-apppublisher@cc9910a8d59f2eb55cbb83df0a3800cf3b5300e0 # v1.4
@@ -56,6 +77,7 @@ jobs:
       # of this version is under way already (.github/scripts/store.ps1). The token reads the release's
       # notes.
       - name: Submit the package
+        id: submit
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}

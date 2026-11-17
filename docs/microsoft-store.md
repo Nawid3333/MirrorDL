@@ -109,14 +109,23 @@ Once the last line says **✅ Microsoft Store: certified and live**, the version
 Certification takes Microsoft hours to a few days; **Store status** (`store-status.yml`) asks the
 Store every 3 hours while a release waits for it (also from the Actions tab, **Run workflow**).
 
+**A release while the one before is in certification.** The Store takes no new submission until the
+one in certification is done, and that can take days. So a release that comes out meanwhile isn't
+submitted at once, and that is no failure: its line says **⏳ Microsoft Store: waits until the Store
+has finished the version before**. Once that version is live (or failed), **Store status** submits
+the waiting one by itself, with the package its own run built. If several releases wait, only the
+newest goes in; the older ones say **⏭️ left out, a newer version goes in instead**. A run keeps the
+package for 30 days; a release still waiting after that isn't submitted anymore, and the next one
+goes in as usual.
+
 **An issue only when something fails.** Its line turns ❌, and the issue **Release vX.Y.Z: a step
 failed** opens, labeled `release-failed` and assigned to the repository's owner, so GitHub tells
 you. It says what failed and links to the run; the same failure is said once. When nothing is ❌
 anymore (a re-run went through, say), the issue closes itself.
 
 What fails on the way by itself (a download, signing in, an upload) is tried again first; a
-submission only if none of this version is under way yet, since a new one would delete it. What
-gets an issue:
+submission only if none of this version is under way yet, since a new one would delete it, and none
+of an earlier version either (see above). What gets an issue:
 
 - the release files couldn't be built, or the published downloads don't pass the check (they must
   download, be whole, and hold their program);
