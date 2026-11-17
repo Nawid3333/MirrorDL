@@ -4,6 +4,10 @@
 # where that submission is, and marks it live there - or opens an issue for a failed certification, a
 # submission that was replaced, or one that takes over a week. With no release waiting, it doesn't even
 # sign in.
+#
+# Then it submits what had to wait: the Store takes no new submission while one is in certification, so
+# a release that came out meanwhile is queued (store.yml). Once nothing is in certification anymore, the
+# newest queued release goes in, with the package its own run built (kept there 30 days).
 name: Store status
 
 on:
@@ -27,6 +31,9 @@ jobs:
     permissions:
       contents: write # the status list in the release notes
       issues: write   # an issue when something is wrong
+    outputs:
+      tag: ${{ steps.waiting.outputs.tag }}
+      state: ${{ steps.store.outputs.state }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -96,4 +103,98 @@ jobs:
               if [ "$days" -ge 7 ]; then
                 "$rollout" fail "$TAG" store-live "The Store's submission is still at $STATUS after more than a week; $partner may say why."
               fi ;;
+          esac
+
+  # Only when the Store is free: no release in certification anymore - none was, or the one that was is
+  # now live, failed or gone. (If the Store is busy with something else all the same, store.yml says so
+  # and the release stays queued.)
+  next:
+    name: Find a release queued for the Store
+    needs: check
+    if: needs.check.outputs.tag == '' || contains(fromJSON('["live", "failed", "gone"]'), needs.check.outputs.state)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # the status list in the release notes
+      issues: write   # an issue when its package is gone
+      actions: read   # the run that kept its package
+    outputs:
+      tag: ${{ steps.queued.outputs.tag }}
+      run: ${{ steps.queued.outputs.run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Find the release and its package
+        id: queued
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag=$(.github/scripts/rollout.sh queued)
+          if [ -z "$tag" ]; then
+            echo 'No release waits to be submitted to the Store.'
+            exit 0
+          fi
+          # The package release.yml built for the release's commit, on the run that built it.
+          sha=$(gh api "repos/$GH_REPO/commits/$tag" --jq .sha)
+          run=$(gh api "repos/$GH_REPO/actions/artifacts?name=store-package&per_page=100" \
+            --jq "[.artifacts[] | select(.expired | not) | select(.workflow_run.head_sha == \"$sha\")][0].workflow_run.id // empty")
+          if [ -z "$run" ]; then
+            .github/scripts/rollout.sh fail "$tag" store-submitted "The Store package of ${tag#v} is not kept anymore (a run keeps it for 30 days), so it can't be submitted; the next release goes to the Store as usual."
+            exit 0
+          fi
+          echo "$tag goes to the Store now, with the package of run $run."
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
+  submit:
+    name: Microsoft Store
+    needs: next
+    if: needs.next.outputs.tag != ''
+    uses: ./.github/workflows/store.yml
+    permissions:
+      contents: read
+      actions: read # the package from the release's run
+    with:
+      tag: ${{ needs.next.outputs.tag }}
+      run-id: ${{ needs.next.outputs.run }}
+    secrets:
+      AZURE_AD_TENANT_ID: ${{ secrets.AZURE_AD_TENANT_ID }}
+      AZURE_AD_APPLICATION_CLIENT_ID: ${{ secrets.AZURE_AD_APPLICATION_CLIENT_ID }}
+      AZURE_AD_APPLICATION_SECRET: ${{ secrets.AZURE_AD_APPLICATION_SECRET }}
+      SELLER_ID: ${{ secrets.SELLER_ID }}
+
+  report:
+    name: Report the submission
+    needs: [next, submit]
+    if: always() && needs.next.outputs.tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # the status list in the release notes
+      issues: write   # an issue when submitting failed
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Update the release's status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.next.outputs.tag }}
+          STORE: ${{ needs.submit.result }}
+          STORE_RESULT: ${{ needs.submit.outputs.result }}
+        run: |
+          set -euo pipefail
+          rollout=.github/scripts/rollout.sh
+          case $STORE:$STORE_RESULT in
+            success:queued) echo "The Store is still busy; $TAG stays queued for the next look." ;;
+            success:*) "$rollout" ok "$TAG" store-submitted ;;
+            *) "$rollout" fail "$TAG" store-submitted "Submitting the queued release to the Microsoft Store did not work ($STORE); the GitHub release is out regardless. Fix the cause, then re-run the failed jobs of this Store status run." ;;
           esac

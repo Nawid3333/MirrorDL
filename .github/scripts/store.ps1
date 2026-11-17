@@ -11,7 +11,8 @@ release's notes on their own, store-status.yml asks where the submission is.
 
 Signs in first, with TENANT_ID, SELLER_ID, CLIENT_ID and CLIENT_SECRET from the environment. submit and
 notes read the release's notes on GitHub with gh (GH_TOKEN, GH_REPO) and put its changes into the Store's
-"What's new in this version". The status action writes state (live, failed, waiting, gone or unknown)
+"What's new in this version". submit writes result (submitted, or queued while the Store is still busy
+with an earlier version) to GITHUB_OUTPUT. The status action writes state (live, failed, waiting, gone or unknown)
 and status (Microsoft's word) to GITHUB_OUTPUT.
 #>
 param(
@@ -157,6 +158,7 @@ Connect-Store
 
 if ($Action -eq 'submit') {
     $blocked = $false
+    $queued = $false
     for ($attempt = 1; ; $attempt++) {
         try {
             # Already there, or under way - from an earlier try, or a re-run of this job? A new publish would
@@ -164,6 +166,15 @@ if ($Action -eq 'submit') {
             $submission = Get-Submission
             if ($submission.Ours -and $submission.Status -in $underWay + 'Published') {
                 Write-Host "The submission of $storeVersion is under way already ($($submission.Status))."
+                break
+            }
+            # Another version under way - in certification, say: the Store neither deletes that submission nor
+            # starts a new one until it is done, which takes hours to days. Trying again here can't help, so
+            # this version waits: store-status.yml submits it once the Store is free.
+            if (-not $submission.Ours -and $submission.Status -in $underWay) {
+                Write-Host ("The Store is still busy with an earlier version ($($submission.Status)) and takes no new " +
+                            "submission until that is done. $storeVersion waits; Store status (store-status.yml) submits it then.")
+                $queued = $true
                 break
             }
             if ($attempt -le 3) {
@@ -197,8 +208,15 @@ if ($Action -eq 'submit') {
         Write-Host "Submitting failed; looking again in $(60 * $attempt) s."
         Start-Sleep -Seconds (60 * $attempt)
     }
-    $submission = Get-Submission
-    "MirrorDL $storeVersion is submitted to the Microsoft Store: $($submission.Status)." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+    if ($queued) {
+        "MirrorDL $storeVersion waits until the Microsoft Store has finished the version before ($($submission.Status))." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+        'result=queued' >> $env:GITHUB_OUTPUT
+    }
+    else {
+        $submission = Get-Submission
+        "MirrorDL $storeVersion is submitted to the Microsoft Store: $($submission.Status)." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+        'result=submitted' >> $env:GITHUB_OUTPUT
+    }
 }
 elseif ($Action -eq 'notes') {
     # Only for the version the Store has, and not while a submission of it is still under way: a new
